@@ -45,9 +45,21 @@ void drawBoard(RenderWindow &window) {
     }
 }
 
-void placeStone(RenderWindow &window, int x, int y) {
+struct Stone {
+    int x, y;
+    bool isBlack;
+};
+
+vector<Stone> stonePositions;
+bool isBlackTurn = true;
+
+void placeStone(RenderWindow &window, int x, int y, bool isBlack) {
     CircleShape stone(1.0 *cellSize / 2.5);
-    stone.setFillColor(Color::White);
+    if (isBlack) {
+        stone.setFillColor(Color::Black);
+    } else {
+        stone.setFillColor(Color::White);
+    }
     stone.setOutlineColor(Color::Black);
     stone.setOutlineThickness(-2);
     
@@ -55,7 +67,7 @@ void placeStone(RenderWindow &window, int x, int y) {
     window.draw(stone);
 }
 
-void handleMouseClick(RenderWindow &window, vector<pair<int, int>> &stonePositions) {
+void handleMouseClick(RenderWindow &window, vector<Stone> &stonePositions) {
     Event event;
     while (window.pollEvent(event)) {
         if (event.type == Event::Closed) {
@@ -66,26 +78,40 @@ void handleMouseClick(RenderWindow &window, vector<pair<int, int>> &stonePositio
                 int x = mousePos.x / cellSize;
                 int y = mousePos.y / cellSize;
 
-                stonePositions.push_back(make_pair(x, y));
+                bool stoneAlreadyExists = false;
+                for (const auto &stone : stonePositions) {
+                    if (stone.x == x && stone.y == y) {
+                        stoneAlreadyExists = true;
+                        break;
+                    }
+                }
+
+                if (!stoneAlreadyExists) {
+                    Stone stone;
+                    stone.x = x;
+                    stone.y = y;
+                    stone.isBlack = isBlackTurn;
+                    stonePositions.push_back(stone);
+                    isBlackTurn = !isBlackTurn;
+                }
             }
         }
     }
 }
 
-int main()
-{
+int main() {
 
     RenderWindow window(VideoMode(700, 1300), "Go/Weiqi/Baduk");
     window.setPosition(Vector2i(300, 20));
 
-    vector<pair<int, int>> stonePositions;
+    vector<Stone> stonePositions;
 
     while (window.isOpen()) {
         handleMouseClick(window, stonePositions);
         window.clear();
         drawBoard(window);
-        for (const auto &pos : stonePositions) {
-            placeStone(window, pos.first, pos.second);
+        for (const auto &stone : stonePositions) {
+            placeStone(window, stone.x, stone.y, stone.isBlack);
         }
         window.display();
     }
