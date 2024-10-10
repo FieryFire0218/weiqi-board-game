@@ -60,7 +60,7 @@ void placeStone(RenderWindow &window, int x, int y, bool isBlack) {
     } else {
         stone.setFillColor(Color::White);
     }
-    stone.setOutlineColor(Color::Black);
+    stone.setOutlineColor(Color(128, 128, 128));
     stone.setOutlineThickness(-2);
     
     stone.setPosition(halfCell + x * cellSize - stone.getRadius(), halfCell + y * cellSize - stone.getRadius());
