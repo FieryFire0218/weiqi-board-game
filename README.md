@@ -4,6 +4,6 @@
 NOT DONE 
 
 
-compile: g++ src/main.cpp -o sfml-app -lsfml-graphics -lsfml-window -lsfml-system
+compile: g++ src/main.cpp src/board.cpp src/stone.cpp -o sfml-app -lsfml-graphics -lsfml-window -lsfml-system
 
 run: ./sfml-app
