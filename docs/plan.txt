@@ -1,0 +1,7 @@
+1. fix directory (so not everything is in main.cpp)
+2. make capturing work
+3. add scoring and win/lose
+4. add board positions on side of window
+5. make full screen scale properly
+6. add clearing board (starting new game) and undo 
+7. maybe indicate some way whose turn it is
