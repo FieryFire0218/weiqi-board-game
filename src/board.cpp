@@ -1,8 +1,10 @@
 #include "board.hpp"
+#include <queue>
+#include <set>
 using namespace std;
 using namespace sf;
 
-const int cellSize = 35;
+const int cellSize = 73;
 const int halfCell = cellSize / 2;
 const int boardSize = 19;
 
@@ -44,6 +46,60 @@ void drawBoard(RenderWindow &window) {
     }
 }
 
+static Stone* getStoneAt(vector<Stone> &stonePositions, int x, int y) {
+    for (auto &stone : stonePositions) {
+        if (stone.x == x && stone.y == y) {
+            return &stone;
+        }
+    }
+    return nullptr;
+}
+
+void checkAndCaptureStones(vector<Stone> &stonePositions, int x, int y) {
+    Stone* start = getStoneAt(stonePositions, x, y);
+    if (!start) return;
+
+    bool isBlack = start->isBlack;
+    queue<pair<int, int>> q;
+    set<pair<int, int>> visited;
+    vector<pair<int, int>> group;
+    bool hasLiberty = false;
+
+    q.push({x, y});
+    visited.insert({x, y});
+
+    int dx[] = {1, -1, 0, 0};
+    int dy[] = {0, 0, 1, -1};
+
+    while (!q.empty()) {
+        auto [cx, cy] = q.front(); q.pop();
+        group.push_back({cx, cy});
+        for (int d = 0; d < 4; ++d) {
+            int nx = cx + dx[d], ny = cy + dy[d];
+            if (nx < 0 || ny < 0 || nx >= boardSize || ny >= boardSize) continue;
+            if (visited.count({nx, ny})) continue;
+            Stone* neighbor = getStoneAt(stonePositions, nx, ny);
+            if (!neighbor) {
+                hasLiberty = true;
+            } else if (neighbor->isBlack == isBlack) {
+                q.push({nx, ny});
+                visited.insert({nx, ny});
+            }
+        }
+    }
+
+    if (!hasLiberty) {
+        // Remove all stones in group
+        for (auto &pos : group) {
+            stonePositions.erase(
+                std::remove_if(stonePositions.begin(), stonePositions.end(),
+                    [&](const Stone &s) { return s.x == pos.first && s.y == pos.second; }),
+                stonePositions.end()
+            );
+        }
+    }
+}
+
 void handleMouseClick(RenderWindow &window, vector<Stone> &stonePositions, bool &isBlackTurn) {
     Event event;
     while (window.pollEvent(event)) {
@@ -69,6 +125,20 @@ void handleMouseClick(RenderWindow &window, vector<Stone> &stonePositions, bool 
                     stone.y = y;
                     stone.isBlack = isBlackTurn;
                     stonePositions.push_back(stone);
+
+                    // Check for captures for both colors
+                    int dx[] = {1, -1, 0, 0};
+                    int dy[] = {0, 0, 1, -1};
+                    for (int d = 0; d < 4; ++d) {
+                        int nx = x + dx[d], ny = y + dy[d];
+                        Stone* neighbor = getStoneAt(stonePositions, nx, ny);
+                        if (neighbor && neighbor->isBlack != isBlackTurn) {
+                            checkAndCaptureStones(stonePositions, nx, ny);
+                        }
+                    }
+                    // Also check self-capture (suicide)
+                    checkAndCaptureStones(stonePositions, x, y);
+
                     isBlackTurn = !isBlackTurn;
                 }
             }

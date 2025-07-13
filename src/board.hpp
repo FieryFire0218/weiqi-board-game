@@ -12,4 +12,5 @@ extern const int boardSize;
 
 bool isStarPoint(int x, int y);
 void drawBoard(RenderWindow &window);
+void checkAndCaptureStones(vector<Stone> &stonePositions, int x, int y);
 void handleMouseClick(RenderWindow &window, vector<Stone> &stonePositions, bool &isBlackTurn);

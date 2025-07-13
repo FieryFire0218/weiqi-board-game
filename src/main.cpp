@@ -6,8 +6,8 @@ using namespace std;
 using namespace sf;
 
 int main() {
-    RenderWindow window(VideoMode(700, 1300), "Go/Weiqi/Baduk");
-    window.setPosition(Vector2i(300, 20));
+    RenderWindow window(VideoMode(1450, 1500), "Go/Weiqi/Baduk");
+    window.setPosition(Vector2i(500, 20));
 
     vector<Stone> stonePositions;
     bool isBlackTurn = true;
