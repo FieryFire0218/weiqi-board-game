@@ -4,7 +4,7 @@
 using namespace std;
 using namespace sf;
 
-const int cellSize = 73;
+const int cellSize = 35;
 const int halfCell = cellSize / 2;
 const int boardSize = 19;
 
