@@ -1,6 +1,9 @@
 #include "board.hpp"
 #include <queue>
 #include <set>
+#include <algorithm>
+#include <string>
+#include <cmath>
 using namespace std;
 using namespace sf;
 
@@ -55,6 +58,17 @@ static Stone* getStoneAt(vector<Stone> &stonePositions, int x, int y) {
     return nullptr;
 }
 
+static string boardKey(const vector<Stone> &stones) {
+    string key;
+    key.assign(boardSize * boardSize, '0'); // 0 = empty, B = black, W = white
+    for (const auto &s : stones) {
+        if (s.x >= 0 && s.x < boardSize && s.y >= 0 && s.y < boardSize) {
+            key[s.y * boardSize + s.x] = s.isBlack ? 'B' : 'W';
+        }
+    }
+    return key;
+}
+
 void checkAndCaptureStones(vector<Stone> &stonePositions, int x, int y) {
     Stone* start = getStoneAt(stonePositions, x, y);
     if (!start) return;
@@ -92,7 +106,7 @@ void checkAndCaptureStones(vector<Stone> &stonePositions, int x, int y) {
         // Remove all stones in group
         for (auto &pos : group) {
             stonePositions.erase(
-                std::remove_if(stonePositions.begin(), stonePositions.end(),
+                remove_if(stonePositions.begin(), stonePositions.end(),
                     [&](const Stone &s) { return s.x == pos.first && s.y == pos.second; }),
                 stonePositions.end()
             );
@@ -101,6 +115,8 @@ void checkAndCaptureStones(vector<Stone> &stonePositions, int x, int y) {
 }
 
 void handleMouseClick(RenderWindow &window, vector<Stone> &stonePositions, bool &isBlackTurn) {
+    static string prevKey; // S_{t-1}
+    static string currKey; // S_t
     Event event;
     while (window.pollEvent(event)) {
         if (event.type == Event::Closed) {
@@ -108,39 +124,69 @@ void handleMouseClick(RenderWindow &window, vector<Stone> &stonePositions, bool 
         } else if (event.type == Event::MouseButtonPressed) {
             if (event.mouseButton.button == Mouse::Left) {
                 Vector2i mousePos = Mouse::getPosition(window);
-                int x = mousePos.x / cellSize;
-                int y = mousePos.y / cellSize;
 
-                bool stoneAlreadyExists = false;
-                for (const auto &stone : stonePositions) {
-                    if (stone.x == x && stone.y == y) {
-                        stoneAlreadyExists = true;
-                        break;
+                float gx = (mousePos.x - halfCell) / static_cast<float>(cellSize);
+                float gy = (mousePos.y - halfCell) / static_cast<float>(cellSize);
+                int x = static_cast<int>(lround(gx));
+                int y = static_cast<int>(lround(gy));
+                if (x < 0 || y < 0 || x >= boardSize || y >= boardSize) {
+                    continue;
+                }
+
+                float centerX = halfCell + x * cellSize;
+                float centerY = halfCell + y * cellSize;
+                float dx = mousePos.x - centerX;
+                float dy = mousePos.y - centerY;
+                float dist2 = dx*dx + dy*dy;
+                float maxDist = cellSize * 0.45f; // ~half a cell
+                if (dist2 > maxDist * maxDist) {
+                    // Too far from intersection, ignore
+                    continue;
+                }
+
+                if (getStoneAt(stonePositions, x, y)) {
+                    continue;
+                }
+
+                if (currKey.empty()) {
+                    string init = boardKey(stonePositions);
+                    prevKey = init; // S_{t-1} == S_t at start
+                    currKey = init; // S_t
+                }
+
+                // Simulate the move
+                vector<Stone> temp = stonePositions;
+                temp.push_back(Stone{x, y, isBlackTurn});
+
+                // Capture any adjacent opponent groups with no liberties
+                int offX[] = {1, -1, 0, 0};
+                int offY[] = {0, 0, 1, -1};
+                for (int d = 0; d < 4; ++d) {
+                    int nx = x + offX[d], ny = y + offY[d];
+                    Stone* neighbor = getStoneAt(temp, nx, ny);
+                    if (neighbor && neighbor->isBlack != isBlackTurn) {
+                        checkAndCaptureStones(temp, nx, ny);
                     }
                 }
 
-                if (!stoneAlreadyExists) {
-                    Stone stone;
-                    stone.x = x;
-                    stone.y = y;
-                    stone.isBlack = isBlackTurn;
-                    stonePositions.push_back(stone);
-
-                    // Check for captures for both colors
-                    int dx[] = {1, -1, 0, 0};
-                    int dy[] = {0, 0, 1, -1};
-                    for (int d = 0; d < 4; ++d) {
-                        int nx = x + dx[d], ny = y + dy[d];
-                        Stone* neighbor = getStoneAt(stonePositions, nx, ny);
-                        if (neighbor && neighbor->isBlack != isBlackTurn) {
-                            checkAndCaptureStones(stonePositions, nx, ny);
-                        }
-                    }
-                    // Also check self-capture (suicide)
-                    checkAndCaptureStones(stonePositions, x, y);
-
-                    isBlackTurn = !isBlackTurn;
+                // Suicide check
+                checkAndCaptureStones(temp, x, y);
+                if (!getStoneAt(temp, x, y)) {
+                    // Suicide -> reject, do not toggle turn
+                    continue;
                 }
+
+                // Ko check
+                string newKey = boardKey(temp);
+                if (newKey == prevKey) {
+                    continue;
+                }
+
+                // Accept move
+                stonePositions.swap(temp);
+                prevKey = currKey;
+                currKey = newKey;
+                isBlackTurn = !isBlackTurn;
             }
         }
     }

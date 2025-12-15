@@ -1,9 +1,9 @@
-1. implement ko (no repetition) and no suicide (currently can't place stone but still skips turn as if it was placed)
-2. add scoring and ability to pass/end game
-3. indicate whose turn it is
-4. ability to undo/redo
-5. add board positions on side of window
-6. make full screen scale properly
-7. add clearing board (starting new game) 
-8. ability to add handicap stones
-9. a menu of some kind
+1. add scoring and ability to pass/end game
+2. indicate whose turn it is
+3. ability to undo/redo
+4. add board positions on side of window
+5. make full screen scale properly
+6. add clearing board (starting new game) 
+7. ability to add handicap stones
+8. a menu of some kind
+9. use sockets to make it multiplayer
