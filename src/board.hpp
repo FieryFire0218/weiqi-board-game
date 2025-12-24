@@ -13,4 +13,15 @@ extern const int boardSize;
 bool isStarPoint(int x, int y);
 void drawBoard(RenderWindow &window);
 void checkAndCaptureStones(vector<Stone> &stonePositions, int x, int y);
-void handleMouseClick(RenderWindow &window, vector<Stone> &stonePositions, bool &isBlackTurn);
+View createBoardView();
+void updateViewForWindow(RenderWindow &window, View &view);
+void handleMouseClick(RenderWindow &window, View &view, vector<Stone> &stonePositions, bool &isBlackTurn);
+
+struct ScoreResult {
+    int black; // B stones + territory
+    int white; // W stones + territory
+};
+
+ScoreResult calculateScores(const vector<Stone> &stonePositions);
+
+char determineWinner(const ScoreResult &score);

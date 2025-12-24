@@ -26,27 +26,69 @@ bool isStarPoint(int x, int y) {
 }
 
 void drawBoard(RenderWindow &window) {
-    RectangleShape cell(Vector2f(cellSize, cellSize));
-    cell.setFillColor(Color(181, 136, 99));
-    cell.setOutlineColor(Color::Black);
-    cell.setOutlineThickness(1);
+    // Board background
+    RectangleShape bg(Vector2f(boardSize * cellSize, boardSize * cellSize));
+    bg.setFillColor(Color(181, 136, 99));
+    bg.setPosition(0.f, 0.f);
+    window.draw(bg);
 
-    CircleShape starPoint(0.35 * cellSize / 2.5);
+    // Grid lines 
+    Color lineColor = Color::Black;
+
+    // Horizontal lines
+    for (int j = 0; j < boardSize; ++j) {
+        RectangleShape line(Vector2f((boardSize - 1) * cellSize, 1.f));
+        line.setFillColor(lineColor);
+        line.setPosition(halfCell, halfCell + j * cellSize);
+        window.draw(line);
+    }
+    // Vertical lines
+    for (int i = 0; i < boardSize; ++i) {
+        RectangleShape line(Vector2f(1.f, (boardSize - 1) * cellSize));
+        line.setFillColor(lineColor);
+        line.setPosition(halfCell + i * cellSize, halfCell);
+        window.draw(line);
+    }
+
+    // Star points
+    CircleShape starPoint(0.35f * cellSize / 2.5f);
     starPoint.setFillColor(Color::Black);
-    starPoint.setOutlineColor(Color::Black);
-    starPoint.setOutlineThickness(-2);
-
+    starPoint.setOutlineThickness(0); 
     for (int i = 0; i < boardSize; i++) {
         for (int j = 0; j < boardSize; j++) {
-            cell.setPosition(halfCell + i * cellSize, halfCell + j * cellSize);
-            window.draw(cell);
-
             if (isStarPoint(i, j)) {
-                starPoint.setPosition(halfCell + i * cellSize - starPoint.getRadius(), halfCell + j * cellSize - starPoint.getRadius());
+                starPoint.setPosition(
+                    halfCell + i * cellSize - starPoint.getRadius(),
+                    halfCell + j * cellSize - starPoint.getRadius()
+                );
                 window.draw(starPoint);
             }
         }
     }
+}
+
+View createBoardView() {
+    float size = static_cast<float>(boardSize * cellSize); // square logical board
+    View view(FloatRect(0.f, 0.f, size, size));
+    view.setCenter(size / 2.f, size / 2.f);
+    return view;
+}
+
+void updateViewForWindow(RenderWindow &window, View &view) {
+    Vector2u ws = window.getSize();
+    float windowRatio = static_cast<float>(ws.x) / static_cast<float>(ws.y);
+    float viewRatio = view.getSize().x / view.getSize().y;
+
+    FloatRect viewport;
+    if (windowRatio > viewRatio) {
+        float width = viewRatio / windowRatio;
+        viewport = FloatRect((1.f - width) / 2.f, 0.f, width, 1.f);
+    } else {
+        float height = windowRatio / viewRatio;
+        viewport = FloatRect(0.f, (1.f - height) / 2.f, 1.f, height);
+    }
+    view.setViewport(viewport);
+    window.setView(view);
 }
 
 static Stone* getStoneAt(vector<Stone> &stonePositions, int x, int y) {
@@ -114,16 +156,19 @@ void checkAndCaptureStones(vector<Stone> &stonePositions, int x, int y) {
     }
 }
 
-void handleMouseClick(RenderWindow &window, vector<Stone> &stonePositions, bool &isBlackTurn) {
+void handleMouseClick(RenderWindow &window, View &view, vector<Stone> &stonePositions, bool &isBlackTurn) {
     static string prevKey; // S_{t-1}
     static string currKey; // S_t
     Event event;
     while (window.pollEvent(event)) {
         if (event.type == Event::Closed) {
             window.close();
+        } else if (event.type == Event::Resized) {
+            updateViewForWindow(window, view);
         } else if (event.type == Event::MouseButtonPressed) {
             if (event.mouseButton.button == Mouse::Left) {
-                Vector2i mousePos = Mouse::getPosition(window);
+                Vector2i mousePosPx = Mouse::getPosition(window);
+                Vector2f mousePos = window.mapPixelToCoords(mousePosPx);
 
                 float gx = (mousePos.x - halfCell) / static_cast<float>(cellSize);
                 float gy = (mousePos.y - halfCell) / static_cast<float>(cellSize);
@@ -190,4 +235,76 @@ void handleMouseClick(RenderWindow &window, vector<Stone> &stonePositions, bool 
             }
         }
     }
+}
+
+ScoreResult calculateScores(const vector<Stone> &stonePositions) {
+    // 0 = empty, 1 = black, 2 = white
+    vector<vector<int>> occ(boardSize, vector<int>(boardSize, 0));
+    int blackStones = 0, whiteStones = 0;
+
+    for (const auto &s : stonePositions) {
+        if (s.x < 0 || s.y < 0 || s.x >= boardSize || s.y >= boardSize) continue;
+        occ[s.y][s.x] = s.isBlack ? 1 : 2;
+        if (s.isBlack) ++blackStones; else ++whiteStones;
+    }
+
+    vector<vector<uint8_t>> visited(boardSize, vector<uint8_t>(boardSize, 0));
+    int blackTerritory = 0, whiteTerritory = 0;
+
+    auto inBounds = [&](int x, int y) {
+        return x >= 0 && y >= 0 && x < boardSize && y < boardSize;
+    };
+
+    int dx[4] = {1, -1, 0, 0};
+    int dy[4] = {0, 0, 1, -1};
+
+    for (int y = 0; y < boardSize; ++y) {
+        for (int x = 0; x < boardSize; ++x) {
+            if (occ[y][x] != 0 || visited[y][x]) continue;
+
+            // BFS over empty region
+            queue<pair<int,int>> q;
+            q.push({x, y});
+            visited[y][x] = 1;
+
+            int regionSize = 0;
+            bool adjBlack = false, adjWhite = false;
+
+            while (!q.empty()) {
+                auto [cx, cy] = q.front(); q.pop();
+                ++regionSize;
+
+                for (int d = 0; d < 4; ++d) {
+                    int nx = cx + dx[d], ny = cy + dy[d];
+                    if (!inBounds(nx, ny)) continue;
+
+                    if (occ[ny][nx] == 0) {
+                        if (!visited[ny][nx]) {
+                            visited[ny][nx] = 1;
+                            q.push({nx, ny});
+                        }
+                    } else if (occ[ny][nx] == 1) {
+                        adjBlack = true;
+                    } else if (occ[ny][nx] == 2) {
+                        adjWhite = true;
+                    }
+                }
+            }
+
+            if (adjBlack && !adjWhite) blackTerritory += regionSize;
+            else if (adjWhite && !adjBlack) whiteTerritory += regionSize;
+            // mixed adjacency = neutral, ignored
+        }
+    }
+
+    ScoreResult res;
+    res.black = blackStones + blackTerritory;
+    res.white = whiteStones + whiteTerritory;
+    return res;
+}
+
+char determineWinner(const ScoreResult &score) {
+    if (score.black > score.white) return 'B';
+    else if (score.white > score.black) return 'W';
+    else return 'T'; // tie
 }

@@ -1,4 +1,4 @@
-1. add scoring and ability to pass/end game
+1. add ability to pass/end game
 2. indicate whose turn it is
 3. ability to undo/redo
 4. add board positions on side of window
@@ -7,3 +7,4 @@
 7. ability to add handicap stones
 8. a menu of some kind
 9. use sockets to make it multiplayer
+10. add KataGo API for AI analysis on best moves
