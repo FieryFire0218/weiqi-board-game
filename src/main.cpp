@@ -18,15 +18,19 @@ int main() {
 
     vector<Stone> stonePositions;
     bool isBlackTurn = true;
+    int consecutivePasses = 0;
+    bool gameEnded = false;
     string lastTitle;
 
     while (window.isOpen()) {
-        handleMouseClick(window, view, stonePositions, isBlackTurn);
+        handleMouseClick(window, view, stonePositions, isBlackTurn, consecutivePasses, gameEnded);
         window.clear();
         drawBoard(window);
         for (const auto &stone : stonePositions) {
             placeStone(window, stone.x, stone.y, stone.isBlack);
         }
+
+        drawTurnIndicator(window, isBlackTurn, gameEnded);
 
         ScoreResult scores = calculateScores(stonePositions);
         char winner = determineWinner(scores);
@@ -34,6 +38,11 @@ int main() {
             "Go/Weiqi/Baduk — B: " + to_string(scores.black) +
             "  W: " + to_string(scores.white) +
             "  Winner: " + (winner == 'T' ? string("Tie") : (winner == 'B' ? string("Black") : string("White")));
+        if (!gameEnded) {
+            title += "  Turn: " + string(isBlackTurn ? "Black" : "White");
+        } else {
+            title += "  Ended";
+        }
         if (title != lastTitle) {
             window.setTitle(title);
             lastTitle = title;

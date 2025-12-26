@@ -1,10 +1,8 @@
-1. add ability to pass/end game
-2. indicate whose turn it is
+2. fix indication stone
 3. ability to undo/redo
 4. add board positions on side of window
-5. make full screen scale properly
-6. add clearing board (starting new game) 
-7. ability to add handicap stones
-8. a menu of some kind
-9. use sockets to make it multiplayer
-10. add KataGo API for AI analysis on best moves
+5. add clearing board (starting new game) 
+6. ability to add handicap stones
+7. a menu of some kind
+8. use sockets to make it multiplayer
+9. add KataGo API for AI analysis on best moves

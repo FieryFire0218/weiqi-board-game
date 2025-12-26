@@ -10,6 +10,7 @@ A simple Go/Weiqi/Baduk board game rendered with SFML.
 - Capture resolution via group/liberty check ([src/board.cpp](src/board.cpp), [`checkAndCaptureStones`](src/board.hpp))
 - No-suicide rule: illegal self-capture moves are rejected; turn does not toggle ([src/board.cpp](src/board.cpp))
 - Basic ko (immediate ko): prevents recreating the position from two plies ago ([src/board.cpp](src/board.cpp))
+- Turn indicator: a small stone at the top-left shows the upcoming stone color.
 
 Entry point: [src/main.cpp](src/main.cpp)
 
@@ -29,6 +30,7 @@ Entry point: [src/main.cpp](src/main.cpp)
 ## Controls
 
 - Left-click: place a stone on the nearest intersection (must be within a tolerance of the intersection center)
+- P: pass. The game ends after two consecutive passes.
 - Window close button: exit
 
 ## Project Structure
@@ -44,15 +46,13 @@ Entry point: [src/main.cpp](src/main.cpp)
 ## Roadmap (not yet implemented)
 
 From [docs/plan.txt](docs/plan.txt):
-1. Scoring and ability to pass/end game (enter scoring when both players pass)
-2. Indicate whose turn it is (UI overlay or status text)
-3. Undo/redo (maintain move history; apply/revert captures)
-4. Board coordinates on the side of the window
-5. Proper fullscreen scaling
-6. Clear board / start new game
-7. Handicap stones
-8. In-game menu (new game, undo/redo, pass, settings)
-9. Multiplayer via sockets (local network or internet; consider SFML-network or BSD sockets)
+1. Undo/redo (maintain move history; apply/revert captures)
+2. Board coordinates on the side of the window
+3. Clear board / start new game
+4. Handicap stones
+5. In-game menu (new game, undo/redo, pass, settings)
+6. Multiplayer via sockets (local network or internet; consider SFML-network or BSD sockets)
+7. KataGo API for AI analysis
 
 ## Notes on Scoring (planned)
 
