@@ -67,53 +67,6 @@ void drawBoard(RenderWindow &window) {
     }
 }
 
-void drawTurnIndicator(RenderWindow &window, bool isBlackTurn, bool gameEnded) {
-    View boardView = window.getView();
-    FloatRect vp = boardView.getViewport();
-    Vector2u ws = window.getSize();
-
-    float leftBarWidthPx = vp.left * static_cast<float>(ws.x);
-    float rightBarWidthPx = (1.f - vp.left - vp.width) * static_cast<float>(ws.x);
-    float barWidthPx = max(leftBarWidthPx, rightBarWidthPx);
-
-    if (barWidthPx <= 2.f) {
-        return;
-    }
-
-    View old = window.getView();
-    window.setView(window.getDefaultView());
-
-    float centerX = (leftBarWidthPx >= rightBarWidthPx)
-                    ? (leftBarWidthPx * 0.5f)
-                    : (static_cast<float>(ws.x) - rightBarWidthPx * 0.5f);
-    float centerY = static_cast<float>(ws.y) * 0.5f;
-
-    float margin = 4.f;
-    float maxRadius = (barWidthPx * 0.5f) - margin;
-    float radius = clamp(maxRadius, 10.f, 60.f);
-
-    CircleShape backdrop(radius + 6.f);
-    backdrop.setPointCount(96);
-    backdrop.setFillColor(Color(40, 40, 40));
-    backdrop.setOutlineThickness(0.f);
-    backdrop.setPosition(centerX - (radius + 6.f), centerY - (radius + 6.f));
-
-    CircleShape indicator(radius);
-    indicator.setPointCount(96);
-    indicator.setFillColor(isBlackTurn ? Color::Black : Color(240, 240, 240));
-    Color border = gameEnded
-        ? Color(200, 50, 50)
-        : (isBlackTurn ? Color(240, 240, 240)
-                       : Color(0, 0, 0));
-    indicator.setOutlineThickness(4.f);
-    indicator.setOutlineColor(border);
-    indicator.setPosition(centerX - radius, centerY - radius);
-
-    window.draw(backdrop);
-    window.draw(indicator);
-    window.setView(old);
-}
-
 View createBoardView() {
     float size = static_cast<float>(boardSize * cellSize); // square logical board
     View view(FloatRect(0.f, 0.f, size, size));

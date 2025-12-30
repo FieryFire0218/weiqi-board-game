@@ -10,7 +10,6 @@ A simple Go/Weiqi/Baduk board game rendered with SFML.
 - Capture resolution via group/liberty check ([src/board.cpp](src/board.cpp), [`checkAndCaptureStones`](src/board.hpp))
 - No-suicide rule: illegal self-capture moves are rejected; turn does not toggle ([src/board.cpp](src/board.cpp))
 - Basic ko (immediate ko): prevents recreating the position from two plies ago ([src/board.cpp](src/board.cpp))
-- Turn indicator: a small stone at the top-left shows the upcoming stone color.
 
 Entry point: [src/main.cpp](src/main.cpp)
 

@@ -1,8 +1,7 @@
-2. fix indication stone
-3. ability to undo/redo
-4. add board positions on side of window
-5. add clearing board (starting new game) 
-6. ability to add handicap stones
-7. a menu of some kind
-8. use sockets to make it multiplayer
-9. add KataGo API for AI analysis on best moves
+1. ability to undo/redo
+2. add board positions on side of window
+3. add clearing board (starting new game) 
+4. ability to add handicap stones
+5. a menu of some kind
+6. use sockets to make it multiplayer
+7. add KataGo API for AI analysis on best moves

@@ -30,8 +30,6 @@ int main() {
             placeStone(window, stone.x, stone.y, stone.isBlack);
         }
 
-        drawTurnIndicator(window, isBlackTurn, gameEnded);
-
         ScoreResult scores = calculateScores(stonePositions);
         char winner = determineWinner(scores);
         string title =

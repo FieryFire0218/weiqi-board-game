@@ -15,7 +15,6 @@ void drawBoard(RenderWindow &window);
 void checkAndCaptureStones(vector<Stone> &stonePositions, int x, int y);
 View createBoardView();
 void updateViewForWindow(RenderWindow &window, View &view);
-void drawTurnIndicator(RenderWindow &window, bool isBlackTurn, bool gameEnded);
 void handleMouseClick(RenderWindow &window, View &view, vector<Stone> &stonePositions, bool &isBlackTurn, int &consecutivePasses, bool &gameEnded);
 
 struct ScoreResult {
