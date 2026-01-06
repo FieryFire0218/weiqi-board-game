@@ -32,6 +32,12 @@ Entry point: [src/main.cpp](src/main.cpp)
 - P: pass. The game ends after two consecutive passes.
 - Window close button: exit
 
+## Multiplayer
+
+- Host: `./bin/sfml-app --host`
+- Join: `./bin/sfml-app --join <host-ip>`
+- Port: 53000 
+
 ## Project Structure
 
 - [src/board.hpp](src/board.hpp): declarations for board drawing and rules
@@ -50,15 +56,7 @@ From [docs/plan.txt](docs/plan.txt):
 3. Clear board / start new game
 4. Handicap stones
 5. In-game menu (new game, undo/redo, pass, settings)
-6. Multiplayer via sockets (local network or internet; consider SFML-network or BSD sockets)
-7. KataGo API for AI analysis
-
-## Notes on Scoring (planned)
-
-- Basic area scoring can be implemented via flood-fill of empty regions:
-  - If an empty region is adjacent only to black stones, it is black territory; only white stones → white territory; mixed → neutral.
-  - Score = stones on board + territory; add komi to white.
-- Alternatively, integration with a GTP engine (e.g., KataGo) for robust scoring and analysis, at the cost of an external dependency.
+6. KataGo API for AI analysis
 
 ## License
 

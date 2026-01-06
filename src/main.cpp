@@ -9,30 +9,29 @@
 using namespace std;
 using namespace sf;
 
-static const unsigned short kPort = 52000;
+static const unsigned short kPort = 53000;
 
-static bool sendState(TcpSocket &sock, const vector<Stone> &stones, bool isBlackTurn, int consecutivePasses, bool gameEnded) {
-    string payload = "STATE " + serializeBoard(stones) + " " +
-                     (isBlackTurn ? "1" : "0") + " " +
-                     to_string(consecutivePasses) + " " +
-                     (gameEnded ? "1" : "0") + "\n";
+static string pendingState;
+static void enqueueState(const vector<Stone> &stones, bool isBlackTurn, int consecutivePasses, bool gameEnded) {
+    pendingState = "STATE " + serializeBoard(stones) + " " +
+                   (isBlackTurn ? "1" : "0") + " " +
+                   to_string(consecutivePasses) + " " +
+                   (gameEnded ? "1" : "0") + "\n";
+}
 
-    size_t offset = 0;
-    while (offset < payload.size()) {
+static void pumpSend(TcpSocket &sock) {
+    while (!pendingState.empty()) {
         size_t sent = 0;
-        Socket::Status st = sock.send(payload.data() + offset,
-                                      payload.size() - offset, sent);
+        Socket::Status st = sock.send(pendingState.data(), pendingState.size(), sent);
         if (st == Socket::Done || st == Socket::Partial) {
-            offset += sent;
-            continue;
+            pendingState.erase(0, sent);
+        } else if (st == Socket::NotReady) {
+            break;
+        } else {
+            pendingState.clear();
+            break;
         }
-        if (st == Socket::NotReady) {
-            sleep(milliseconds(1));
-            continue;
-        }
-        return false; 
     }
-    return true;
 }
 
 static bool recvState(TcpSocket &sock, string &buffer, vector<Stone> &stones, bool &isBlackTurn, int &consecutivePasses, bool &gameEnded) {
@@ -136,11 +135,12 @@ int main(int argc, char** argv) {
              prevPass != consecutivePasses ||
              prevEnded != gameEnded ||
              prevTurn != isBlackTurn)) {
-            sendState(socket, stonePositions, isBlackTurn, consecutivePasses, gameEnded);
+            enqueueState(stonePositions, isBlackTurn, consecutivePasses, gameEnded);
             myTurn = (isBlackTurn == myColorIsBlack);
         }
 
         if (networked) {
+            pumpSend(socket);
             if (recvState(socket, recvBuffer, stonePositions, isBlackTurn, consecutivePasses, gameEnded)) {
                 myTurn = (isBlackTurn == myColorIsBlack);
             }
