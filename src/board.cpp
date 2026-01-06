@@ -100,15 +100,28 @@ static Stone* getStoneAt(vector<Stone> &stonePositions, int x, int y) {
     return nullptr;
 }
 
-static string boardKey(const vector<Stone> &stones) {
+string serializeBoard(const vector<Stone> &stones) {
     string key;
-    key.assign(boardSize * boardSize, '0'); // 0 = empty, B = black, W = white
+    key.assign(boardSize * boardSize, '0'); 
     for (const auto &s : stones) {
         if (s.x >= 0 && s.x < boardSize && s.y >= 0 && s.y < boardSize) {
             key[s.y * boardSize + s.x] = s.isBlack ? 'B' : 'W';
         }
     }
     return key;
+}
+
+void deserializeBoard(const string &key, vector<Stone> &stones) {
+    stones.clear();
+    if (static_cast<int>(key.size()) < boardSize * boardSize) return;
+    for (int y = 0; y < boardSize; ++y) {
+        for (int x = 0; x < boardSize; ++x) {
+            char c = key[y * boardSize + x];
+            if (c == 'B' || c == 'W') {
+                stones.push_back(Stone{x, y, c == 'B'});
+            }
+        }
+    }
 }
 
 void checkAndCaptureStones(vector<Stone> &stonePositions, int x, int y) {
@@ -156,7 +169,7 @@ void checkAndCaptureStones(vector<Stone> &stonePositions, int x, int y) {
     }
 }
 
-void handleMouseClick(RenderWindow &window, View &view, vector<Stone> &stonePositions, bool &isBlackTurn, int &consecutivePasses, bool &gameEnded) {
+void handleMouseClick(RenderWindow &window, View &view, vector<Stone> &stonePositions, bool &isBlackTurn, int &consecutivePasses, bool &gameEnded, bool allowMove) {
     static string prevKey; // S_{t-1}
     static string currKey; // S_t
     Event event;
@@ -165,11 +178,13 @@ void handleMouseClick(RenderWindow &window, View &view, vector<Stone> &stonePosi
             window.close();
         } else if (event.type == Event::Resized) {
             updateViewForWindow(window, view);
+        } else if (!allowMove) {
+            continue;
         } else if (event.type == Event::KeyPressed) {
             if (event.key.code == Keyboard::P) {
                 if (gameEnded) continue;
                 if (currKey.empty()) {
-                    string init = boardKey(stonePositions);
+                    string init = serializeBoard(stonePositions);
                     prevKey = init; 
                     currKey = init; 
                 }
@@ -211,7 +226,7 @@ void handleMouseClick(RenderWindow &window, View &view, vector<Stone> &stonePosi
                 }
 
                 if (currKey.empty()) {
-                    string init = boardKey(stonePositions);
+                    string init = serializeBoard(stonePositions);
                     prevKey = init; // S_{t-1} == S_t at start
                     currKey = init; // S_t
                 }
@@ -239,7 +254,7 @@ void handleMouseClick(RenderWindow &window, View &view, vector<Stone> &stonePosi
                 }
 
                 // Ko check
-                string newKey = boardKey(temp);
+                string newKey = serializeBoard(temp);
                 if (newKey == prevKey) {
                     continue;
                 }

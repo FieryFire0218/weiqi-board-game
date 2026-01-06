@@ -8,9 +8,9 @@ OBJDIR    := $(OUTDIR)/obj
 TARGET    := $(OUTDIR)/sfml-app
 
 # Try pkg-config first, fall back to explicit libs
-SFML_FLAGS := $(shell pkg-config --cflags --libs sfml-graphics sfml-window sfml-system 2>/dev/null)
+SFML_FLAGS := $(shell pkg-config --cflags --libs sfml-graphics sfml-window sfml-system sfml-network 2>/dev/null)
 ifeq ($(strip $(SFML_FLAGS)),)
-  SFML_FLAGS := -lsfml-graphics -lsfml-window -lsfml-system
+  SFML_FLAGS := -lsfml-graphics -lsfml-window -lsfml-system -lsfml-network
 endif
 
 OBJS := $(patsubst src/%.cpp,$(OBJDIR)/%.o,$(SRC))

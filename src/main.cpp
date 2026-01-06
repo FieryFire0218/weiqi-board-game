@@ -1,17 +1,116 @@
 #include <SFML/Graphics.hpp>
+#include <SFML/Network.hpp>
 #include <vector>
 #include "board.hpp"
 #include "stone.hpp"
 #include <string>
+#include <iostream>
+#include <sstream>
 using namespace std;
 using namespace sf;
 
-int main() {
+static const unsigned short kPort = 52000;
+
+static bool sendState(TcpSocket &sock, const vector<Stone> &stones, bool isBlackTurn, int consecutivePasses, bool gameEnded) {
+    string payload = "STATE " + serializeBoard(stones) + " " +
+                     (isBlackTurn ? "1" : "0") + " " +
+                     to_string(consecutivePasses) + " " +
+                     (gameEnded ? "1" : "0") + "\n";
+
+    size_t offset = 0;
+    while (offset < payload.size()) {
+        size_t sent = 0;
+        Socket::Status st = sock.send(payload.data() + offset,
+                                      payload.size() - offset, sent);
+        if (st == Socket::Done || st == Socket::Partial) {
+            offset += sent;
+            continue;
+        }
+        if (st == Socket::NotReady) {
+            sleep(milliseconds(1));
+            continue;
+        }
+        return false; 
+    }
+    return true;
+}
+
+static bool recvState(TcpSocket &sock, string &buffer, vector<Stone> &stones, bool &isBlackTurn, int &consecutivePasses, bool &gameEnded) {
+    char data[2048];
+    size_t received = 0;
+    if (sock.receive(data, sizeof(data), received) != Socket::Done) return false;
+    buffer.append(data, received);
+    size_t pos;
+    while ((pos = buffer.find('\n')) != string::npos) {
+        string line = buffer.substr(0, pos);
+        buffer.erase(0, pos + 1);
+        if (line.rfind("STATE ", 0) == 0) {
+            string key; string turnStr; string passStr; string endedStr;
+            istringstream iss(line.substr(6));
+            iss >> key >> turnStr >> passStr >> endedStr;
+            if (!key.empty()) {
+                deserializeBoard(key, stones);
+                isBlackTurn = (turnStr == "1");
+                consecutivePasses = stoi(passStr);
+                gameEnded = (endedStr == "1");
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+int main(int argc, char** argv) {
     ContextSettings settings;
     settings.antialiasingLevel = 4;
     RenderWindow window(VideoMode(700, 700), "Go/Weiqi/Baduk", Style::Default, settings);
     window.setPosition(Vector2i(300, 10));
     window.setVerticalSyncEnabled(true);
+
+    bool networked = false;
+    bool isHost = false;
+    TcpListener listener;
+    TcpSocket socket;
+    string recvBuffer;
+
+    if (argc >= 2) {
+        string mode = argv[1];
+        if (mode == "--host") {
+            isHost = true;
+            if (listener.listen(kPort) != Socket::Done) {
+                cerr << "Failed to listen on port " << kPort << "\n";
+                return 1;
+            }
+            cout << "Waiting for peer on port " << kPort << "...\n";
+            if (listener.accept(socket) != Socket::Done) {
+                cerr << "Failed to accept connection\n";
+                return 1;
+            }
+            socket.setBlocking(false);
+            networked = true;
+            cout << "Client connected\n";
+        } else if (mode == "--join" && argc >= 3) {
+            IpAddress hostIp(argv[2]);
+            socket.setBlocking(true);
+            const int maxTries = 20;
+            bool connected = false;
+            for (int i = 0; i < maxTries; ++i) {
+                if (socket.connect(hostIp, kPort, seconds(1)) == Socket::Done) {
+                    connected = true;
+                    break;
+                }
+                sleep(milliseconds(500));
+            }
+            if (!connected) {
+                cerr << "Failed to connect to host after retries\n";
+                return 1;
+            }
+            socket.setBlocking(false);
+            networked = true;
+            isHost = false;
+            cout << "Connected to host\n";
+        }
+    }
 
     View view = createBoardView();
     updateViewForWindow(window, view);
@@ -21,9 +120,32 @@ int main() {
     int consecutivePasses = 0;
     bool gameEnded = false;
     string lastTitle;
+    bool myTurn = !networked || isHost;
+    const bool myColorIsBlack = !networked || isHost;
 
     while (window.isOpen()) {
-        handleMouseClick(window, view, stonePositions, isBlackTurn, consecutivePasses, gameEnded);
+        size_t prevStones = stonePositions.size();
+        int prevPass = consecutivePasses;
+        bool prevEnded = gameEnded;
+        bool prevTurn = isBlackTurn;
+
+        handleMouseClick(window, view, stonePositions, isBlackTurn, consecutivePasses, gameEnded, myTurn);
+
+        if (networked &&
+            (prevStones != stonePositions.size() ||
+             prevPass != consecutivePasses ||
+             prevEnded != gameEnded ||
+             prevTurn != isBlackTurn)) {
+            sendState(socket, stonePositions, isBlackTurn, consecutivePasses, gameEnded);
+            myTurn = (isBlackTurn == myColorIsBlack);
+        }
+
+        if (networked) {
+            if (recvState(socket, recvBuffer, stonePositions, isBlackTurn, consecutivePasses, gameEnded)) {
+                myTurn = (isBlackTurn == myColorIsBlack);
+            }
+        }
+
         window.clear();
         drawBoard(window);
         for (const auto &stone : stonePositions) {
