@@ -1,1 +1,3 @@
-bin/*
+bin/*.o
+bin/obj/
+bin/sfml-app
