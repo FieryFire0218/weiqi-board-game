@@ -37,14 +37,14 @@ void drawBoard(RenderWindow &window) {
 
     // Horizontal lines
     for (int j = 0; j < boardSize; ++j) {
-        RectangleShape line(Vector2f((boardSize - 1) * cellSize, 1.f));
+        RectangleShape line(Vector2f((boardSize - 1) * cellSize, 2.f));
         line.setFillColor(lineColor);
         line.setPosition(halfCell, halfCell + j * cellSize);
         window.draw(line);
     }
     // Vertical lines
     for (int i = 0; i < boardSize; ++i) {
-        RectangleShape line(Vector2f(1.f, (boardSize - 1) * cellSize));
+        RectangleShape line(Vector2f(2.f, (boardSize - 1) * cellSize));
         line.setFillColor(lineColor);
         line.setPosition(halfCell + i * cellSize, halfCell);
         window.draw(line);

@@ -62,7 +62,7 @@ static bool recvState(TcpSocket &sock, string &buffer, vector<Stone> &stones, bo
 int main(int argc, char** argv) {
     ContextSettings settings;
     settings.antialiasingLevel = 4;
-    RenderWindow window(VideoMode(700, 700), "Go/Weiqi/Baduk", Style::Default, settings);
+    RenderWindow window(VideoMode(400, 400), "Go/Weiqi/Baduk", Style::Default, settings);
     window.setPosition(Vector2i(300, 10));
     window.setVerticalSyncEnabled(true);
 
