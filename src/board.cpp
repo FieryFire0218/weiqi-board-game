@@ -169,103 +169,181 @@ void checkAndCaptureStones(vector<Stone> &stonePositions, int x, int y) {
     }
 }
 
-void handleMouseClick(RenderWindow &window, View &view, vector<Stone> &stonePositions, bool &isBlackTurn, int &consecutivePasses, bool &gameEnded, bool allowMove) {
-    static string prevKey; // S_{t-1}
-    static string currKey; // S_t
+bool tryPlaceStone(
+    vector<Stone>& stones,
+    bool& isBlackTurn,
+    int& consecutivePasses,
+    bool& gameEnded,
+    RuleHistory& history,
+    int x,
+    int y
+) {
+    if (gameEnded) return false;
+
+    if (x < 0 || y < 0 || x >= boardSize || y >= boardSize) {
+        return false;
+    }
+
+    if (getStoneAt(stones, x, y)) {
+        return false;
+    }
+
+    const string before = serializeBoard(stones);
+
+    // Validate on a copy so rejected moves cannot alter the real board.
+    vector<Stone> next = stones;
+    next.push_back(Stone{x, y, isBlackTurn});
+
+    const int offX[] = {1, -1, 0, 0};
+    const int offY[] = {0, 0, 1, -1};
+
+    for (int d = 0; d < 4; ++d) {
+        const int nx = x + offX[d];
+        const int ny = y + offY[d];
+
+        Stone* neighbor = getStoneAt(next, nx, ny);
+
+        if (neighbor && neighbor->isBlack != isBlackTurn) {
+            checkAndCaptureStones(next, nx, ny);
+        }
+    }
+
+    // Reject suicide after resolving opponent captures.
+    checkAndCaptureStones(next, x, y);
+
+    if (!getStoneAt(next, x, y)) {
+        return false;
+    }
+
+    const string nextBoard = serializeBoard(next);
+
+    // Simple ko: cannot recreate the position before the last action
+    if (!history.previousBoard.empty() &&
+        nextBoard == history.previousBoard) {
+        return false;
+    }
+
+    history.previousBoard = before;
+    stones.swap(next);
+    isBlackTurn = !isBlackTurn;
+    consecutivePasses = 0;
+
+    return true;
+}
+
+bool tryPass(
+    const vector<Stone>& stones,
+    bool& isBlackTurn,
+    int& consecutivePasses,
+    bool& gameEnded,
+    RuleHistory& history
+) {
+    if (gameEnded) return false;
+
+    history.previousBoard = serializeBoard(stones);
+    isBlackTurn = !isBlackTurn;
+    ++consecutivePasses;
+    gameEnded = consecutivePasses >= 2;
+
+    return true;
+}
+
+void handleMouseClick(
+    RenderWindow& window,
+    View& view,
+    vector<Stone>& stones,
+    bool& isBlackTurn,
+    int& consecutivePasses,
+    bool& gameEnded,
+    RuleHistory& history,
+    bool allowMove,
+    bool singleMove
+) {
     Event event;
+
     while (window.pollEvent(event)) {
         if (event.type == Event::Closed) {
             window.close();
-        } else if (event.type == Event::Resized) {
-            updateViewForWindow(window, view);
-        } else if (!allowMove) {
             continue;
-        } else if (event.type == Event::KeyPressed) {
-            if (event.key.code == Keyboard::P) {
-                if (gameEnded) continue;
-                if (currKey.empty()) {
-                    string init = serializeBoard(stonePositions);
-                    prevKey = init; 
-                    currKey = init; 
-                }
-                prevKey = currKey;
-                isBlackTurn = !isBlackTurn;
-                ++consecutivePasses;
-                if (consecutivePasses >= 2) {
-                    gameEnded = true;
-                }
+        }
+
+        if (event.type == Event::Resized) {
+            updateViewForWindow(window, view);
+            continue;
+        }
+
+        // Still process window events when moves are disabled.
+        if (!allowMove || gameEnded) {
+            continue;
+        }
+
+        bool accepted = false;
+
+        if (event.type == Event::KeyPressed &&
+            event.key.code == Keyboard::P) {
+            accepted = tryPass(
+                stones,
+                isBlackTurn,
+                consecutivePasses,
+                gameEnded,
+                history
+            );
+        } else if (
+            event.type == Event::MouseButtonPressed &&
+            event.mouseButton.button == Mouse::Left
+        ) {
+            const Vector2i pixel(
+                event.mouseButton.x,
+                event.mouseButton.y
+            );
+
+            // Ignore clicks in any letterboxed area outside the board view.
+            if (!window.getViewport(view).contains(pixel)) {
                 continue;
             }
-        } else if (event.type == Event::MouseButtonPressed) {
-            if (event.mouseButton.button == Mouse::Left) {
-                if (gameEnded) continue;
-                Vector2i mousePosPx = Mouse::getPosition(window);
-                Vector2f mousePos = window.mapPixelToCoords(mousePosPx);
 
-                float gx = (mousePos.x - halfCell) / static_cast<float>(cellSize);
-                float gy = (mousePos.y - halfCell) / static_cast<float>(cellSize);
-                int x = static_cast<int>(lround(gx));
-                int y = static_cast<int>(lround(gy));
-                if (x < 0 || y < 0 || x >= boardSize || y >= boardSize) {
-                    continue;
-                }
+            const Vector2f position =
+                window.mapPixelToCoords(pixel, view);
 
-                float centerX = halfCell + x * cellSize;
-                float centerY = halfCell + y * cellSize;
-                float dx = mousePos.x - centerX;
-                float dy = mousePos.y - centerY;
-                float dist2 = dx*dx + dy*dy;
-                float maxDist = cellSize * 0.45f; // ~half a cell
-                if (dist2 > maxDist * maxDist) {
-                    // Too far from intersection, ignore
-                    continue;
-                }
+            const float gx =
+                (position.x - halfCell) / static_cast<float>(cellSize);
 
-                if (getStoneAt(stonePositions, x, y)) {
-                    continue;
-                }
+            const float gy =
+                (position.y - halfCell) / static_cast<float>(cellSize);
 
-                if (currKey.empty()) {
-                    string init = serializeBoard(stonePositions);
-                    prevKey = init; // S_{t-1} == S_t at start
-                    currKey = init; // S_t
-                }
+            const int x = static_cast<int>(lround(gx));
+            const int y = static_cast<int>(lround(gy));
 
-                // Simulate the move
-                vector<Stone> temp = stonePositions;
-                temp.push_back(Stone{x, y, isBlackTurn});
-
-                // Capture any adjacent opponent groups with no liberties
-                int offX[] = {1, -1, 0, 0};
-                int offY[] = {0, 0, 1, -1};
-                for (int d = 0; d < 4; ++d) {
-                    int nx = x + offX[d], ny = y + offY[d];
-                    Stone* neighbor = getStoneAt(temp, nx, ny);
-                    if (neighbor && neighbor->isBlack != isBlackTurn) {
-                        checkAndCaptureStones(temp, nx, ny);
-                    }
-                }
-
-                // Suicide check
-                checkAndCaptureStones(temp, x, y);
-                if (!getStoneAt(temp, x, y)) {
-                    // Suicide -> reject, do not toggle turn
-                    continue;
-                }
-
-                // Ko check
-                string newKey = serializeBoard(temp);
-                if (newKey == prevKey) {
-                    continue;
-                }
-
-                // Accept move
-                stonePositions.swap(temp);
-                prevKey = currKey;
-                currKey = newKey;
-                isBlackTurn = !isBlackTurn;
-                consecutivePasses = 0;
+            if (x < 0 || y < 0 || x >= boardSize || y >= boardSize) {
+                continue;
             }
+
+            const float centerX = halfCell + x * cellSize;
+            const float centerY = halfCell + y * cellSize;
+
+            const float dx = position.x - centerX;
+            const float dy = position.y - centerY;
+            const float maxDistance = cellSize * 0.45f;
+
+            if (dx * dx + dy * dy > maxDistance * maxDistance) {
+                continue;
+            }
+
+            accepted = tryPlaceStone(
+                stones,
+                isBlackTurn,
+                consecutivePasses,
+                gameEnded,
+                history,
+                x,
+                y
+            );
+        }
+
+        // In multiplayer, one successful action ends this player's turn.
+        // Remaining events may close/resize the window but cannot play again.
+        if (accepted && singleMove) {
+            allowMove = false;
         }
     }
 }

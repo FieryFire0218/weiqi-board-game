@@ -2,6 +2,7 @@
 
 #include <SFML/Graphics.hpp>
 #include <vector>
+#include <string>
 #include "stone.hpp"
 using namespace std;
 using namespace sf;
@@ -15,7 +16,39 @@ void drawBoard(RenderWindow &window);
 void checkAndCaptureStones(vector<Stone> &stonePositions, int x, int y);
 View createBoardView();
 void updateViewForWindow(RenderWindow &window, View &view);
-void handleMouseClick(RenderWindow &window, View &view, vector<Stone> &stonePositions, bool &isBlackTurn, int &consecutivePasses, bool &gameEnded, bool allowMove = true);
+struct RuleHistory {
+    string previousBoard;
+};
+
+bool tryPlaceStone(
+    vector<Stone>& stones,
+    bool& isBlackTurn,
+    int& consecutivePasses,
+    bool& gameEnded,
+    RuleHistory& history,
+    int x,
+    int y
+);
+
+bool tryPass(
+    const vector<Stone>& stones,
+    bool& isBlackTurn,
+    int& consecutivePasses,
+    bool& gameEnded,
+    RuleHistory& history
+);
+
+void handleMouseClick(
+    RenderWindow& window,
+    View& view,
+    vector<Stone>& stones,
+    bool& isBlackTurn,
+    int& consecutivePasses,
+    bool& gameEnded,
+    RuleHistory& history,
+    bool allowMove = true,
+    bool singleMove = false
+);
 string serializeBoard(const vector<Stone> &stones);
 void deserializeBoard(const string &key, vector<Stone> &stones);
 
