@@ -7,6 +7,8 @@
 #include <iostream>
 #include <sstream>
 #include <deque>
+#include <future>
+#include <chrono>
 using namespace std;
 using namespace sf;
 
@@ -244,6 +246,50 @@ static Socket::Status recvState(
     }
 }
 
+static bool parseHostAddress(
+    const string& text,
+    IpAddress& result
+) {
+    if (text == "localhost") {
+        result = IpAddress::LocalHost;
+        return true;
+    }
+
+    istringstream input(text);
+    int octets[4];
+
+    for (int i = 0; i < 4; ++i) {
+        if (!(input >> octets[i]) ||
+            octets[i] < 0 ||
+            octets[i] > 255) {
+            return false;
+        }
+
+        if (i < 3) {
+            char separator;
+
+            if (!(input >> separator) || separator != '.') {
+                return false;
+            }
+        }
+    }
+
+    input >> ws;
+
+    if (!input.eof()) {
+        return false;
+    }
+
+    result = IpAddress(
+        static_cast<Uint8>(octets[0]),
+        static_cast<Uint8>(octets[1]),
+        static_cast<Uint8>(octets[2]),
+        static_cast<Uint8>(octets[3])
+    );
+
+    return true;
+}
+
 int main(int argc, char** argv) {
     ContextSettings settings;
     settings.antialiasingLevel = 4;
@@ -254,47 +300,56 @@ int main(int argc, char** argv) {
 
     bool networked = false;
     bool isHost = false;
+    bool connected = false;
+
     TcpListener listener;
     TcpSocket socket;
     string recvBuffer;
 
-    if (argc >= 2) {
-        string mode = argv[1];
-        if (mode == "--host") {
-            isHost = true;
-            if (listener.listen(kPort) != Socket::Done) {
-                cerr << "Failed to listen on port " << kPort << "\n";
-                return 1;
-            }
-            cout << "Waiting for peer on port " << kPort << "...\n";
-            if (listener.accept(socket) != Socket::Done) {
-                cerr << "Failed to accept connection\n";
-                return 1;
-            }
-            socket.setBlocking(false);
-            networked = true;
-            cout << "Client connected\n";
-        } else if (mode == "--join" && argc >= 3) {
-            IpAddress hostIp(argv[2]);
-            socket.setBlocking(true);
-            const int maxTries = 20;
-            bool connected = false;
-            for (int i = 0; i < maxTries; ++i) {
-                if (socket.connect(hostIp, kPort, seconds(1)) == Socket::Done) {
-                    connected = true;
-                    break;
-                }
-                sleep(milliseconds(500));
-            }
-            if (!connected) {
-                cerr << "Failed to connect to host after retries\n";
-                return 1;
-            }
-            socket.setBlocking(false);
-            networked = true;
-            isHost = false;
-            cout << "Connected to host\n";
+    // Declare this AFTER socket so the background task finishes before
+    // socket is destroyed when main() exits.
+    future<Socket::Status> connectTask;
+
+    IpAddress hostIp;
+    int connectAttempts = 0;
+    const int maxConnectAttempts = 20;
+    Clock retryClock;
+    string connectionStatus;
+
+    if (argc == 2 && string(argv[1]) == "--host") {
+        networked = true;
+        isHost = true;
+
+        listener.setBlocking(false);
+
+        if (listener.listen(kPort) != Socket::Done) {
+            cerr << "Failed to listen on port " << kPort
+                << ". Is another host already running?\n";
+            return 1;
         }
+
+        connectionStatus = "Waiting for White";
+        cout << "Waiting for peer on port " << kPort << "...\n";
+    } else if (
+        argc == 3 &&
+        string(argv[1]) == "--join"
+    ) {
+        networked = true;
+        isHost = false;
+
+        if (!parseHostAddress(argv[2], hostIp)) {
+            cerr << "Use an IPv4 address, such as 127.0.0.1, "
+                << "or localhost.\n";
+            return 1;
+        }
+
+        connectionStatus = "Connecting";
+    } else if (argc != 1) {
+        cerr << "Usage:\n"
+            << "  " << argv[0] << "\n"
+            << "  " << argv[0] << " --host\n"
+            << "  " << argv[0] << " --join <IPv4-or-localhost>\n";
+        return 1;
     }
 
     View view = createBoardView();
@@ -308,10 +363,100 @@ int main(int argc, char** argv) {
     unsigned long long revision = 0;
     bool connectionLost = false;
     string lastTitle;
-    bool myTurn = !networked || isHost;
+    bool myTurn = !networked;
     const bool myColorIsBlack = !networked || isHost;
 
     while (window.isOpen()) {
+        if (networked && !connected && !connectionLost) {
+            if (isHost) {
+                const Socket::Status status = listener.accept(socket);
+
+                if (status == Socket::Done) {
+                    socket.setBlocking(false);
+                    connected = true;
+                    connectionStatus = "Connected";
+
+                    listener.close();
+
+                    cout << "Client connected\n";
+                } else if (status != Socket::NotReady) {
+                    connectionLost = true;
+                    connectionStatus = "Accept failed";
+                    listener.close();
+
+                    cerr << "Failed to accept a connection.\n";
+                }
+            } else {
+                if (
+                    connectTask.valid() &&
+                    connectTask.wait_for(chrono::milliseconds(0)) ==
+                        future_status::ready
+                ) {
+                    const Socket::Status status = connectTask.get();
+
+                    if (status == Socket::Done) {
+                        // The background task is finished. The main thread
+                        // can now safely use this socket.
+                        socket.setBlocking(false);
+                        connected = true;
+                        connectionStatus = "Connected";
+
+                        cout << "Connected to host\n";
+                    } else if (connectAttempts >= maxConnectAttempts) {
+                        connectionLost = true;
+                        connectionStatus = "Connection failed";
+
+                        cerr << "Failed to connect after "
+                            << maxConnectAttempts << " attempts.\n";
+                    } else {
+                        retryClock.restart();
+                        connectionStatus = "Retrying connection";
+                    }
+                }
+
+                const bool retryDue =
+                    connectAttempts == 0 ||
+                    retryClock.getElapsedTime() >= milliseconds(500);
+
+                if (
+                    !connected &&
+                    !connectionLost &&
+                    !connectTask.valid() &&
+                    retryDue
+                ) {
+                    ++connectAttempts;
+
+                    connectionStatus =
+                        "Connecting " +
+                        to_string(connectAttempts) + "/" +
+                        to_string(maxConnectAttempts);
+
+                    connectTask = std::async(
+                        std::launch::async,
+                        [&socket, hostIp]() -> Socket::Status {
+                            // Only this task accesses the socket until
+                            // the main thread collects its result.
+                            socket.setBlocking(true);
+
+                            const Socket::Status status =
+                                socket.connect(hostIp, kPort, seconds(1));
+
+                            if (status != Socket::Done) {
+                                socket.disconnect();
+                            }
+
+                            return status;
+                        }
+                    );
+                }
+            }
+        }
+
+        // Update permission before processing this frame's input.
+        myTurn =
+            !connectionLost &&
+            (!networked ||
+                (connected && isBlackTurn == myColorIsBlack));
         const size_t prevStones = stonePositions.size();
         const int prevPass = consecutivePasses;
         const bool prevEnded = gameEnded;
@@ -342,7 +487,7 @@ int main(int argc, char** argv) {
         if (changed) {
             ++revision;
 
-            if (networked && !connectionLost) {
+            if (networked && connected && !connectionLost) {
                 enqueueState(
                     stonePositions,
                     isBlackTurn,
@@ -353,7 +498,7 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (networked && !connectionLost) {
+        if (networked && connected && !connectionLost) {
             const Socket::Status sendStatus = pumpSend(socket);
 
             Socket::Status receiveStatus = Socket::Done;
@@ -375,6 +520,8 @@ int main(int argc, char** argv) {
             if (sendStatus != Socket::Done ||
                 receiveStatus != Socket::Done) {
                 connectionLost = true;
+                connected = false;
+                connectionStatus = "Disconnected";
                 pendingStates.clear();
                 socket.disconnect();
 
@@ -385,7 +532,8 @@ int main(int argc, char** argv) {
 
         myTurn =
             !connectionLost &&
-            (!networked || isBlackTurn == myColorIsBlack);
+            (!networked ||
+                (connected && isBlackTurn == myColorIsBlack));
 
         window.clear();
         window.setView(view);
@@ -403,7 +551,9 @@ int main(int argc, char** argv) {
         }
 
         if (connectionLost) {
-            title += " | Disconnected";
+            title += " | " + connectionStatus;
+        } else if (networked && !connected) {
+            title += " | " + connectionStatus;
         } else if (gameEnded) {
             const ScoreResult scores = calculateScores(stonePositions);
 

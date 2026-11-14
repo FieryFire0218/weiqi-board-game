@@ -21,10 +21,10 @@ DEPS := $(OBJS:.o=.d)
 all: $(TARGET)
 
 $(TARGET): $(OBJS) | $(OUTDIR)
-	$(CXX) $(OBJS) -o $@ $(SFML_FLAGS)
+	$(CXX) $(OBJS) -o $@ $(SFML_FLAGS) -pthread
 
 $(OBJDIR)/%.o: src/%.cpp | $(OBJDIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -pthread $(INCLUDES) -c $< -o $@
 
 $(OUTDIR) $(OBJDIR):
 	mkdir -p $@
