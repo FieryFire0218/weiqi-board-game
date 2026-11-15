@@ -60,3 +60,18 @@ struct ScoreResult {
 ScoreResult calculateScores(const vector<Stone> &stonePositions);
 
 char determineWinner(const ScoreResult &score);
+
+inline constexpr float statusPanelHeight = 64.f;
+
+FloatRect getPassButtonBounds(
+    const RenderWindow& window
+);
+
+void drawStatusPanel(
+    RenderWindow& window,
+    const Font& font,
+    const string& playerLine,
+    const string& statusLine,
+    const string& detailLine,
+    bool canPass
+);

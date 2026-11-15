@@ -74,21 +74,171 @@ View createBoardView() {
     return view;
 }
 
-void updateViewForWindow(RenderWindow &window, View &view) {
-    Vector2u ws = window.getSize();
-    float windowRatio = static_cast<float>(ws.x) / static_cast<float>(ws.y);
-    float viewRatio = view.getSize().x / view.getSize().y;
+void updateViewForWindow(RenderWindow& window, View& view) {
+    const Vector2u size = window.getSize();
 
-    FloatRect viewport;
-    if (windowRatio > viewRatio) {
-        float width = viewRatio / windowRatio;
-        viewport = FloatRect((1.f - width) / 2.f, 0.f, width, 1.f);
-    } else {
-        float height = windowRatio / viewRatio;
-        viewport = FloatRect(0.f, (1.f - height) / 2.f, 1.f, height);
+    if (size.x == 0 || size.y == 0) {
+        return;
     }
-    view.setViewport(viewport);
+
+    const float width = static_cast<float>(size.x);
+    const float height = static_cast<float>(size.y);
+
+    // Reserve space above the board for status and controls.
+    const float header = min(statusPanelHeight, height * 0.3f);
+    const float availableHeight = height - header;
+
+    // The board always occupies a square viewport.
+    const float side = min(width, availableHeight);
+
+    const float left = (width - side) / 2.f;
+    const float top = header + (availableHeight - side) / 2.f;
+
+    view.setViewport(FloatRect(
+        left / width,
+        top / height,
+        side / width,
+        side / height
+    ));
+
     window.setView(view);
+}
+
+FloatRect getPassButtonBounds(const RenderWindow& window) {
+    const float width =
+        static_cast<float>(window.getSize().x);
+
+    return FloatRect(
+        max(8.f, width - 76.f),
+        8.f,
+        68.f,
+        28.f
+    );
+}
+
+void drawStatusPanel(
+    RenderWindow& window,
+    const Font& font,
+    const string& playerLine,
+    const string& statusLine,
+    const string& detailLine,
+    bool canPass
+) {
+    const Vector2u size = window.getSize();
+
+    if (size.x == 0 || size.y == 0) {
+        return;
+    }
+
+    // Save the board view, then draw the UI in window-pixel coordinates.
+    const View savedView = window.getView();
+
+    window.setView(View(FloatRect(
+        0.f,
+        0.f,
+        static_cast<float>(size.x),
+        static_cast<float>(size.y)
+    )));
+
+    RectangleShape background(Vector2f(
+        static_cast<float>(size.x),
+        statusPanelHeight
+    ));
+
+    background.setFillColor(Color(28, 32, 38));
+    window.draw(background);
+
+    const FloatRect buttonBounds = getPassButtonBounds(window);
+
+    // Fit long messages into their available horizontal space.
+    auto drawLine = [&](
+        const string& value,
+        float y,
+        unsigned int characterSize,
+        Color color,
+        float availableWidth
+    ) {
+        Text text(value, font, characterSize);
+        text.setFillColor(color);
+
+        FloatRect bounds = text.getLocalBounds();
+
+        if (bounds.width > availableWidth &&
+            bounds.width > 0.f) {
+            const float scale =
+                max(1.f, availableWidth) / bounds.width;
+
+            text.setScale(scale, scale);
+        }
+
+        text.setPosition(8.f, y);
+        window.draw(text);
+    };
+
+    const float textWidth =
+        max(1.f, buttonBounds.left - 16.f);
+
+    drawLine(
+        playerLine,
+        4.f,
+        12,
+        Color::White,
+        textWidth
+    );
+
+    drawLine(
+        statusLine,
+        23.f,
+        11,
+        Color(160, 214, 246),
+        textWidth
+    );
+
+    drawLine(
+        detailLine,
+        44.f,
+        10,
+        Color(205, 210, 218),
+        max(1.f, static_cast<float>(size.x) - 16.f)
+    );
+
+    RectangleShape button(Vector2f(
+        buttonBounds.width,
+        buttonBounds.height
+    ));
+
+    button.setPosition(buttonBounds.left, buttonBounds.top);
+
+    button.setFillColor(
+        canPass
+            ? Color(55, 112, 155)
+            : Color(55, 60, 68)
+    );
+
+    window.draw(button);
+
+    Text label("Pass", font, 13);
+
+    label.setFillColor(
+        canPass
+            ? Color::White
+            : Color(145, 150, 158)
+    );
+
+    const FloatRect labelBounds = label.getLocalBounds();
+
+    label.setPosition(
+        buttonBounds.left +
+            (buttonBounds.width - labelBounds.width) / 2.f -
+            labelBounds.left,
+        buttonBounds.top +
+            (buttonBounds.height - labelBounds.height) / 2.f -
+            labelBounds.top
+    );
+
+    window.draw(label);
+
+    window.setView(savedView);
 }
 
 static Stone* getStoneAt(vector<Stone> &stonePositions, int x, int y) {
@@ -297,7 +447,23 @@ void handleMouseClick(
                 event.mouseButton.y
             );
 
-            // Ignore clicks in any letterboxed area outside the board view.
+            if (getPassButtonBounds(window).contains(
+                    static_cast<float>(pixel.x),
+                    static_cast<float>(pixel.y))) {
+                accepted = tryPass(
+                    stones,
+                    isBlackTurn,
+                    consecutivePasses,
+                    gameEnded,
+                    history
+                );
+
+                if (accepted && singleMove) {
+                    allowMove = false;
+                }
+                continue;
+            }
+
             if (!window.getViewport(view).contains(pixel)) {
                 continue;
             }

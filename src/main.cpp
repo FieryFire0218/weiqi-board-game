@@ -298,6 +298,16 @@ int main(int argc, char** argv) {
     window.setVerticalSyncEnabled(true);
     window.setKeyRepeatEnabled(false);
 
+    Font uiFont;
+
+    if (!uiFont.loadFromFile("assets/DejaVuSans.ttf")) {
+        cerr << "Could not load assets/DejaVuSans.ttf.\n"
+            << "Run the game from the project root and "
+            << "check that the assets directory exists.\n";
+
+        return 1;
+    }
+
     bool networked = false;
     bool isHost = false;
     bool connected = false;
@@ -362,7 +372,6 @@ int main(int argc, char** argv) {
     RuleHistory history;
     unsigned long long revision = 0;
     bool connectionLost = false;
-    string lastTitle;
     bool myTurn = !networked;
     const bool myColorIsBlack = !networked || isHost;
 
@@ -535,44 +544,79 @@ int main(int argc, char** argv) {
             (!networked ||
                 (connected && isBlackTurn == myColorIsBlack));
 
-        window.clear();
+        window.clear(Color(28, 32, 38));
         window.setView(view);
         drawBoard(window);
         for (const auto &stone : stonePositions) {
             placeStone(window, stone.x, stone.y, stone.isBlack);
         }
 
-        string title = "Go";
+        string playerLine;
 
         if (networked) {
-            title += myColorIsBlack ? " | You: Black" : " | You: White";
+            playerLine =
+                myColorIsBlack ? "You: Black" : "You: White";
         } else {
-            title += " | Local";
+            playerLine = "Local game";
         }
+
+        if (gameEnded) {
+            playerLine += " | Game over";
+        } else {
+            playerLine += " | Turn: ";
+            playerLine += isBlackTurn ? "Black" : "White";
+        }
+
+        string statusLine;
+        string detailLine;
 
         if (connectionLost) {
-            title += " | " + connectionStatus;
+            statusLine = connectionStatus;
+            detailLine = "Restart both games to reconnect.";
         } else if (networked && !connected) {
-            title += " | " + connectionStatus;
+            statusLine = connectionStatus;
+
+            detailLine = isHost
+                ? "Black moves first once White connects."
+                : "Waiting to connect to the host.";
         } else if (gameEnded) {
-            const ScoreResult scores = calculateScores(stonePositions);
+            const ScoreResult scores =
+                calculateScores(stonePositions);
 
-            title += " | Ended";
-            title += " | Raw area B:" + to_string(scores.black);
-            title += " W:" + to_string(scores.white);
+            statusLine =
+                "Raw area: Black " + to_string(scores.black) +
+                " | White " + to_string(scores.white);
+
+            detailLine = "No komi or dead-stone agreement yet.";
         } else {
-            title += " | Turn: ";
-            title += isBlackTurn ? "Black" : "White";
-
-            if (networked) {
-                title += myTurn ? " | Your move" : " | Waiting";
+            if (!networked) {
+                statusLine = "Place a stone or pass.";
+            } else {
+                statusLine = myTurn
+                    ? "Your move"
+                    : (isBlackTurn
+                        ? "Waiting for Black"
+                        : "Waiting for White");
             }
+
+            detailLine =
+                "Click: place | P / button: pass | Passes: " +
+                to_string(consecutivePasses);
         }
 
-        if (title != lastTitle) {
-            window.setTitle(title);
-            lastTitle = title;
-        }
+        const bool canPass =
+            !gameEnded &&
+            !connectionLost &&
+            (!networked || (connected && myTurn));
+
+        drawStatusPanel(
+            window,
+            uiFont,
+            playerLine,
+            statusLine,
+            detailLine,
+            canPass
+        );
 
         window.display();
     }
