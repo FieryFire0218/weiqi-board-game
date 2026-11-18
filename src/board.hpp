@@ -20,6 +20,54 @@ struct RuleHistory {
     string previousBoard;
 };
 
+struct ScoreReview {
+    bool active = false;
+    bool finalized = false;
+
+    // Player whose turn follows the two passes.
+    bool resumeBlackTurn = true;
+
+    int approvals = 0;
+
+    // '1' means the stone at this intersection is marked dead.
+    string dead =
+        string(boardSize * boardSize, '0');
+};
+
+struct FinalScore {
+    double black = 0.0;
+    double white = 0.0;
+};
+
+inline constexpr double komi = 7.5;
+
+void beginScoreReview(
+    ScoreReview& review,
+    bool isBlackTurn
+);
+
+bool applyReviewAction(
+    const std::vector<Stone>& stones,
+    bool& isBlackTurn,
+    int& consecutivePasses,
+    bool& gameEnded,
+    ScoreReview& review,
+    char action,
+    int x = -1,
+    int y = -1
+);
+
+FinalScore calculateFinalScore(
+    const std::vector<Stone>& stones,
+    const ScoreReview& review
+);
+
+void drawDeadMarkers(
+    sf::RenderWindow& window,
+    const std::vector<Stone>& stones,
+    const ScoreReview& review
+);
+
 bool tryPlaceStone(
     vector<Stone>& stones,
     bool& isBlackTurn,
@@ -46,6 +94,7 @@ void handleMouseClick(
     int& consecutivePasses,
     bool& gameEnded,
     RuleHistory& history,
+    ScoreReview& review,
     bool allowMove = true,
     bool singleMove = false
 );
@@ -68,10 +117,11 @@ FloatRect getPassButtonBounds(
 );
 
 void drawStatusPanel(
-    RenderWindow& window,
-    const Font& font,
+    sf::RenderWindow& window,
+    const sf::Font& font,
     const string& playerLine,
     const string& statusLine,
     const string& detailLine,
-    bool canPass
+    bool canPass,
+    const string& buttonLabel = "Pass"
 );

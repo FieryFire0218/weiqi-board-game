@@ -9,6 +9,8 @@
 #include <deque>
 #include <future>
 #include <chrono>
+#include <iomanip>
+#include <cmath>
 using namespace std;
 using namespace sf;
 
@@ -187,6 +189,111 @@ static bool applyRemoteState(
     return true;
 }
 
+static bool applyRemoteReviewMessage(
+    const string& line,
+    const vector<Stone>& stones,
+    bool& isBlackTurn,
+    int& consecutivePasses,
+    bool& gameEnded,
+    ScoreReview& review,
+    unsigned long long& revision,
+    bool myColorIsBlack
+) {
+    if (!gameEnded ||
+        !review.active ||
+        review.finalized ||
+        isBlackTurn == myColorIsBlack) {
+        return false;
+    }
+
+    istringstream input(line);
+
+    string tag;
+    string key;
+    string extra;
+    unsigned long long incomingRevision;
+    int turnBit = -1;
+    int approvals = -1;
+
+    if (!(input >> tag >> incomingRevision) ||
+        incomingRevision != revision + 1) {
+        return false;
+    }
+
+    if (tag == "REVIEW") {
+        if (!(input >> key >> turnBit >> approvals) ||
+            key.size() !=
+                static_cast<size_t>(boardSize * boardSize) ||
+            approvals < 0 ||
+            approvals > 2) {
+            return false;
+        }
+
+        if (key.find_first_not_of("01") != string::npos) {
+            return false;
+        }
+    } else if (tag == "RESUME") {
+        if (!(input >> turnBit)) {
+            return false;
+        }
+    } else {
+        return false;
+    }
+
+    if ((turnBit != 0 && turnBit != 1) || (input >> extra)) {
+        return false;
+    }
+
+    ScoreReview nextReview = review;
+    bool nextTurn = isBlackTurn;
+    int nextPasses = consecutivePasses;
+    bool nextEnded = gameEnded;
+
+    char action = tag == "RESUME" ? 'R' : 'A';
+    int x = -1;
+    int y = -1;
+
+    if (tag == "REVIEW" && key != review.dead) {
+        size_t position = 0;
+
+        while (key[position] == review.dead[position]) {
+            ++position;
+        }
+
+        action = 'T';
+        x = static_cast<int>(position) % boardSize;
+        y = static_cast<int>(position) / boardSize;
+    }
+
+    if (!applyReviewAction(
+            stones,
+            nextTurn,
+            nextPasses,
+            nextEnded,
+            nextReview,
+            action,
+            x,
+            y) ||
+        nextTurn != (turnBit == 1)) {
+        return false;
+    }
+
+    // Reject arbitrary masks, partial groups, and fabricated approvals.
+    if (tag == "REVIEW" &&
+        (nextReview.dead != key ||
+         nextReview.approvals != approvals)) {
+        return false;
+    }
+
+    review = nextReview;
+    isBlackTurn = nextTurn;
+    consecutivePasses = nextPasses;
+    gameEnded = nextEnded;
+    revision = incomingRevision;
+
+    return true;
+}
+
 static Socket::Status recvState(
     TcpSocket& socket,
     string& buffer,
@@ -195,6 +302,7 @@ static Socket::Status recvState(
     int& consecutivePasses,
     bool& gameEnded,
     RuleHistory& history,
+    ScoreReview& review,
     unsigned long long& revision,
     bool myColorIsBlack
 ) {
@@ -206,7 +314,22 @@ static Socket::Status recvState(
             const string line = buffer.substr(0, newline);
             buffer.erase(0, newline + 1);
 
-            if (!applyRemoteState(
+            bool valid = false;
+
+            if (line.rfind("REVIEW ", 0) == 0 ||
+                line.rfind("RESUME ", 0) == 0) {
+                valid = applyRemoteReviewMessage(
+                    line,
+                    stones,
+                    isBlackTurn,
+                    consecutivePasses,
+                    gameEnded,
+                    review,
+                    revision,
+                    myColorIsBlack
+                );
+            } else {
+                valid = applyRemoteState(
                     line,
                     stones,
                     isBlackTurn,
@@ -214,7 +337,16 @@ static Socket::Status recvState(
                     gameEnded,
                     history,
                     revision,
-                    myColorIsBlack)) {
+                    myColorIsBlack
+                );
+
+                // The received action may have been the second pass.
+                if (valid && gameEnded && !review.active) {
+                    beginScoreReview(review, isBlackTurn);
+                }
+            }
+
+            if (!valid) {
                 return Socket::Error;
             }
         }
@@ -288,6 +420,12 @@ static bool parseHostAddress(
     );
 
     return true;
+}
+
+static string formatPoints(double value) {
+    ostringstream output;
+    output << fixed << setprecision(1) << value;
+    return output.str();
 }
 
 int main(int argc, char** argv) {
@@ -370,6 +508,7 @@ int main(int argc, char** argv) {
     int consecutivePasses = 0;
     bool gameEnded = false;
     RuleHistory history;
+    ScoreReview review;
     unsigned long long revision = 0;
     bool connectionLost = false;
     bool myTurn = !networked;
@@ -470,6 +609,7 @@ int main(int argc, char** argv) {
         const int prevPass = consecutivePasses;
         const bool prevEnded = gameEnded;
         const bool prevTurn = isBlackTurn;
+        const ScoreReview prevReview = review;
 
         handleMouseClick(
             window,
@@ -479,6 +619,7 @@ int main(int argc, char** argv) {
             consecutivePasses,
             gameEnded,
             history,
+            review,
             !connectionLost && (!networked || myTurn),
             networked
         );
@@ -487,23 +628,50 @@ int main(int argc, char** argv) {
             break;
         }
 
+        if (gameEnded && !review.active) {
+            beginScoreReview(review, isBlackTurn);
+        }
+
         const bool changed =
             prevStones != stonePositions.size() ||
             prevPass != consecutivePasses ||
             prevEnded != gameEnded ||
-            prevTurn != isBlackTurn;
+            prevTurn != isBlackTurn ||
+            prevReview.active != review.active ||
+            prevReview.finalized != review.finalized ||
+            prevReview.approvals != review.approvals ||
+            prevReview.dead != review.dead;
 
         if (changed) {
             ++revision;
 
             if (networked && connected && !connectionLost) {
-                enqueueState(
-                    stonePositions,
-                    isBlackTurn,
-                    consecutivePasses,
-                    gameEnded,
-                    revision
-                );
+                if (prevEnded && gameEnded) {
+                    // Mark/unmark a group or accept the current score.
+                    pendingStates.push_back(
+                        "REVIEW " +
+                        to_string(revision) + " " +
+                        review.dead + " " +
+                        (isBlackTurn ? "1" : "0") + " " +
+                        to_string(review.approvals) + "\n"
+                    );
+                } else if (prevEnded && !gameEnded) {
+                    // Resume from score review.
+                    pendingStates.push_back(
+                        "RESUME " +
+                        to_string(revision) + " " +
+                        (isBlackTurn ? "1" : "0") + "\n"
+                    );
+                } else {
+                    // Ordinary placement or pass.
+                    enqueueState(
+                        stonePositions,
+                        isBlackTurn,
+                        consecutivePasses,
+                        gameEnded,
+                        revision
+                    );
+                }
             }
         }
 
@@ -521,6 +689,7 @@ int main(int argc, char** argv) {
                     consecutivePasses,
                     gameEnded,
                     history,
+                    review,
                     revision,
                     myColorIsBlack
                 );
@@ -550,6 +719,7 @@ int main(int argc, char** argv) {
         for (const auto &stone : stonePositions) {
             placeStone(window, stone.x, stone.y, stone.isBlack);
         }
+        drawDeadMarkers(window, stonePositions, review);
 
         string playerLine;
 
@@ -560,8 +730,11 @@ int main(int argc, char** argv) {
             playerLine = "Local game";
         }
 
-        if (gameEnded) {
-            playerLine += " | Game over";
+        if (gameEnded && review.finalized) {
+            playerLine += " | Finished";
+        } else if (gameEnded) {
+            playerLine += " | Review: ";
+            playerLine += isBlackTurn ? "Black" : "White";
         } else {
             playerLine += " | Turn: ";
             playerLine += isBlackTurn ? "Black" : "White";
@@ -580,34 +753,64 @@ int main(int argc, char** argv) {
                 ? "Black moves first once White connects."
                 : "Waiting to connect to the host.";
         } else if (gameEnded) {
-            const ScoreResult scores =
-                calculateScores(stonePositions);
+            const FinalScore score =
+                calculateFinalScore(stonePositions, review);
 
             statusLine =
-                "Raw area: Black " + to_string(scores.black) +
-                " | White " + to_string(scores.white);
+                "B: " + formatPoints(score.black) +
+                " | W: " + formatPoints(score.white);
 
-            detailLine = "No komi or dead-stone agreement yet.";
-        } else {
-            if (!networked) {
-                statusLine = "Place a stone or pass.";
+            if (review.finalized) {
+                const double margin =
+                    std::abs(score.black - score.white);
+
+                if (score.black > score.white) {
+                    detailLine =
+                        "Black wins by " + formatPoints(margin);
+                } else if (score.white > score.black) {
+                    detailLine =
+                        "White wins by " + formatPoints(margin);
+                } else {
+                    detailLine = "Draw";
+                }
+
+                detailLine += " | White komi: 7.5";
             } else {
-                statusLine = myTurn
+                statusLine +=
+                    " | Accepted: " +
+                    to_string(review.approvals) + "/2";
+
+                if (myTurn) {
+                    detailLine =
+                        "Click group: dead/alive | Accept/P | R: resume";
+                } else {
+                    detailLine =
+                        "Waiting for review | Red dots: marked dead";
+                }
+            }
+        } else {
+            statusLine = !networked
+                ? "Place a stone or pass."
+                : (myTurn
                     ? "Your move"
                     : (isBlackTurn
                         ? "Waiting for Black"
-                        : "Waiting for White");
-            }
+                        : "Waiting for White"));
 
             detailLine =
                 "Click: place | P / button: pass | Passes: " +
                 to_string(consecutivePasses);
         }
 
-        const bool canPass =
-            !gameEnded &&
+        const bool canAct =
             !connectionLost &&
-            (!networked || (connected && myTurn));
+            (!networked || (connected && myTurn)) &&
+            (!gameEnded || (review.active && !review.finalized));
+
+        const string buttonLabel =
+            !gameEnded ? "Pass" :
+            review.finalized ? "Done" :
+            "Accept";
 
         drawStatusPanel(
             window,
@@ -615,7 +818,8 @@ int main(int argc, char** argv) {
             playerLine,
             statusLine,
             detailLine,
-            canPass
+            canAct,
+            buttonLabel
         );
 
         window.display();

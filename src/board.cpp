@@ -122,7 +122,8 @@ void drawStatusPanel(
     const string& playerLine,
     const string& statusLine,
     const string& detailLine,
-    bool canPass
+    bool canPass,
+    const string& buttonLabel
 ) {
     const Vector2u size = window.getSize();
 
@@ -217,7 +218,7 @@ void drawStatusPanel(
 
     window.draw(button);
 
-    Text label("Pass", font, 13);
+    Text label(buttonLabel, font, 13);
 
     label.setFillColor(
         canPass
@@ -398,6 +399,105 @@ bool tryPass(
     return true;
 }
 
+void beginScoreReview(ScoreReview& review, bool isBlackTurn) {
+    review = ScoreReview{};
+    review.active = true;
+    review.resumeBlackTurn = isBlackTurn;
+}
+
+bool applyReviewAction(
+    const vector<Stone>& stones,
+    bool& isBlackTurn,
+    int& consecutivePasses,
+    bool& gameEnded,
+    ScoreReview& review,
+    char action,
+    int x,
+    int y
+) {
+    if (!gameEnded || !review.active || review.finalized) {
+        return false;
+    }
+
+    // R: resume actual play without removing any stones.
+    if (action == 'R') {
+        isBlackTurn = review.resumeBlackTurn;
+        consecutivePasses = 0;
+        gameEnded = false;
+        review = ScoreReview{};
+        return true;
+    }
+
+    // A: accept the current dead-stone selection.
+    if (action == 'A') {
+        ++review.approvals;
+        review.finalized = review.approvals == 2;
+    } else if (action == 'T') {
+        // T: toggle an entire connected group.
+        if (x < 0 || y < 0 ||
+            x >= boardSize || y >= boardSize) {
+            return false;
+        }
+
+        const string board = serializeBoard(stones);
+        const int start = y * boardSize + x;
+
+        if (board[start] == '0') {
+            return false;
+        }
+
+        const char color = board[start];
+        const char mark =
+            review.dead[start] == '1' ? '0' : '1';
+
+        vector<bool> visited(boardSize * boardSize, false);
+        queue<int> pending;
+
+        pending.push(start);
+        visited[start] = true;
+
+        const int dx[] = {1, -1, 0, 0};
+        const int dy[] = {0, 0, 1, -1};
+
+        while (!pending.empty()) {
+            const int position = pending.front();
+            pending.pop();
+
+            review.dead[position] = mark;
+
+            for (int direction = 0; direction < 4; ++direction) {
+                const int nx =
+                    position % boardSize + dx[direction];
+
+                const int ny =
+                    position / boardSize + dy[direction];
+
+                if (nx < 0 || ny < 0 ||
+                    nx >= boardSize || ny >= boardSize) {
+                    continue;
+                }
+
+                const int neighbor = ny * boardSize + nx;
+
+                if (!visited[neighbor] &&
+                    board[neighbor] == color) {
+                    visited[neighbor] = true;
+                    pending.push(neighbor);
+                }
+            }
+        }
+
+        // Any edit invalidates earlier acceptance.
+        review.approvals = 0;
+    } else {
+        return false;
+    }
+
+    // Review actions alternate between the two players.
+    isBlackTurn = !isBlackTurn;
+    return true;
+}
+
 void handleMouseClick(
     RenderWindow& window,
     View& view,
@@ -406,6 +506,7 @@ void handleMouseClick(
     int& consecutivePasses,
     bool& gameEnded,
     RuleHistory& history,
+    ScoreReview& review,
     bool allowMove,
     bool singleMove
 ) {
@@ -422,22 +523,53 @@ void handleMouseClick(
             continue;
         }
 
-        // Still process window events when moves are disabled.
-        if (!allowMove || gameEnded) {
+        if (!allowMove) {
+            continue;
+        }
+
+        if (gameEnded && (!review.active || review.finalized)) {
             continue;
         }
 
         bool accepted = false;
 
-        if (event.type == Event::KeyPressed &&
-            event.key.code == Keyboard::P) {
-            accepted = tryPass(
+        auto passOrAccept = [&]() {
+            if (gameEnded) {
+                return applyReviewAction(
+                    stones,
+                    isBlackTurn,
+                    consecutivePasses,
+                    gameEnded,
+                    review,
+                    'A'
+                );
+            }
+
+            return tryPass(
                 stones,
                 isBlackTurn,
                 consecutivePasses,
                 gameEnded,
                 history
             );
+        };
+
+        if (event.type == Event::KeyPressed) {
+            if (event.key.code == Keyboard::P) {
+                accepted = passOrAccept();
+            } else if (
+                event.key.code == Keyboard::R &&
+                gameEnded
+            ) {
+                accepted = applyReviewAction(
+                    stones,
+                    isBlackTurn,
+                    consecutivePasses,
+                    gameEnded,
+                    review,
+                    'R'
+                );
+            }
         } else if (
             event.type == Event::MouseButtonPressed &&
             event.mouseButton.button == Mouse::Left
@@ -450,64 +582,68 @@ void handleMouseClick(
             if (getPassButtonBounds(window).contains(
                     static_cast<float>(pixel.x),
                     static_cast<float>(pixel.y))) {
-                accepted = tryPass(
-                    stones,
-                    isBlackTurn,
-                    consecutivePasses,
-                    gameEnded,
-                    history
-                );
-
-                if (accepted && singleMove) {
-                    allowMove = false;
+                accepted = passOrAccept();
+            } else {
+                if (!window.getViewport(view).contains(pixel)) {
+                    continue;
                 }
-                continue;
+
+                const Vector2f position =
+                    window.mapPixelToCoords(pixel, view);
+
+                const int x = static_cast<int>(lround(
+                    (position.x - halfCell) /
+                    static_cast<float>(cellSize)
+                ));
+
+                const int y = static_cast<int>(lround(
+                    (position.y - halfCell) /
+                    static_cast<float>(cellSize)
+                ));
+
+                if (x < 0 || y < 0 ||
+                    x >= boardSize || y >= boardSize) {
+                    continue;
+                }
+
+                const float dx =
+                    position.x - (halfCell + x * cellSize);
+
+                const float dy =
+                    position.y - (halfCell + y * cellSize);
+
+                const float maxDistance = cellSize * 0.45f;
+
+                if (dx * dx + dy * dy >
+                    maxDistance * maxDistance) {
+                    continue;
+                }
+
+                if (gameEnded) {
+                    accepted = applyReviewAction(
+                        stones,
+                        isBlackTurn,
+                        consecutivePasses,
+                        gameEnded,
+                        review,
+                        'T',
+                        x,
+                        y
+                    );
+                } else {
+                    accepted = tryPlaceStone(
+                        stones,
+                        isBlackTurn,
+                        consecutivePasses,
+                        gameEnded,
+                        history,
+                        x,
+                        y
+                    );
+                }
             }
-
-            if (!window.getViewport(view).contains(pixel)) {
-                continue;
-            }
-
-            const Vector2f position =
-                window.mapPixelToCoords(pixel, view);
-
-            const float gx =
-                (position.x - halfCell) / static_cast<float>(cellSize);
-
-            const float gy =
-                (position.y - halfCell) / static_cast<float>(cellSize);
-
-            const int x = static_cast<int>(lround(gx));
-            const int y = static_cast<int>(lround(gy));
-
-            if (x < 0 || y < 0 || x >= boardSize || y >= boardSize) {
-                continue;
-            }
-
-            const float centerX = halfCell + x * cellSize;
-            const float centerY = halfCell + y * cellSize;
-
-            const float dx = position.x - centerX;
-            const float dy = position.y - centerY;
-            const float maxDistance = cellSize * 0.45f;
-
-            if (dx * dx + dy * dy > maxDistance * maxDistance) {
-                continue;
-            }
-
-            accepted = tryPlaceStone(
-                stones,
-                isBlackTurn,
-                consecutivePasses,
-                gameEnded,
-                history,
-                x,
-                y
-            );
         }
 
-        // In multiplayer, one successful action ends this player's turn.
-        // Remaining events may close/resize the window but cannot play again.
         if (accepted && singleMove) {
             allowMove = false;
         }
@@ -578,6 +714,57 @@ ScoreResult calculateScores(const vector<Stone> &stonePositions) {
     res.black = blackStones + blackTerritory;
     res.white = whiteStones + whiteTerritory;
     return res;
+}
+
+FinalScore calculateFinalScore(
+    const vector<Stone>& stones,
+    const ScoreReview& review
+) {
+    vector<Stone> livingStones;
+
+    for (const auto& stone : stones) {
+        const int position = stone.y * boardSize + stone.x;
+
+        if (!review.active || review.dead[position] != '1') {
+            livingStones.push_back(stone);
+        }
+    }
+
+    const ScoreResult area = calculateScores(livingStones);
+
+    FinalScore result;
+    result.black = static_cast<double>(area.black);
+    result.white = static_cast<double>(area.white) + komi;
+
+    return result;
+}
+
+void drawDeadMarkers(
+    RenderWindow& window,
+    const vector<Stone>& stones,
+    const ScoreReview& review
+) {
+    if (!review.active) {
+        return;
+    }
+
+    CircleShape marker(cellSize * 0.2f);
+    marker.setFillColor(Color(235, 65, 65));
+
+    for (const auto& stone : stones) {
+        const int position = stone.y * boardSize + stone.x;
+
+        if (review.dead[position] != '1') {
+            continue;
+        }
+
+        marker.setPosition(
+            halfCell + stone.x * cellSize - marker.getRadius(),
+            halfCell + stone.y * cellSize - marker.getRadius()
+        );
+
+        window.draw(marker);
+    }
 }
 
 char determineWinner(const ScoreResult &score) {
