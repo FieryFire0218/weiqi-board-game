@@ -294,6 +294,77 @@ static bool applyRemoteReviewMessage(
     return true;
 }
 
+static bool applyResignationMessage(
+    const string& line,
+    ResignationState& resignation,
+    const ScoreReview& review,
+    bool myColorIsBlack
+) {
+    if (line == "RESIGN_REQUEST") {
+        if (!myColorIsBlack) {
+            return false;
+        }
+
+        // A completed scoring result cannot be replaced by a late request.
+        if (review.finalized && !resignation.finished) {
+            pendingStates.push_back("RESIGN_REJECT\n");
+            return true;
+        }
+
+        if (!resignation.finished) {
+            finishResignation(resignation, false);
+        }
+
+        // If the host already resigned, preserve that existing decision.
+        pendingStates.push_back(
+            string("RESIGN_RESULT ") +
+            (resignation.blackResigned ? "B" : "W") +
+            "\n"
+        );
+
+        return true;
+    }
+
+    if (line == "RESIGN_REJECT") {
+        if (myColorIsBlack ||
+            !resignation.pending ||
+            resignation.finished) {
+            return false;
+        }
+
+        resignation.confirmationOpen = false;
+        resignation.pending = false;
+        resignation.requestSent = false;
+
+        return true;
+    }
+
+    istringstream input(line);
+
+    string tag;
+    string color;
+    string extra;
+
+    if (!(input >> tag >> color) ||
+        tag != "RESIGN_RESULT" ||
+        (color != "B" && color != "W") ||
+        (input >> extra) ||
+        myColorIsBlack) {
+        return false;
+    }
+
+    // Only the host may send a resignation result.
+    const bool blackResigned = color == "B";
+
+    if (resignation.finished &&
+        resignation.blackResigned != blackResigned) {
+        return false;
+    }
+
+    finishResignation(resignation, blackResigned);
+    return true;
+}
+
 static Socket::Status recvState(
     TcpSocket& socket,
     string& buffer,
@@ -303,6 +374,7 @@ static Socket::Status recvState(
     bool& gameEnded,
     RuleHistory& history,
     ScoreReview& review,
+    ResignationState& resignation,
     unsigned long long& revision,
     bool myColorIsBlack
 ) {
@@ -316,8 +388,17 @@ static Socket::Status recvState(
 
             bool valid = false;
 
-            if (line.rfind("REVIEW ", 0) == 0 ||
-                line.rfind("RESUME ", 0) == 0) {
+            if (line.rfind("RESIGN", 0) == 0) {
+                valid = applyResignationMessage(
+                    line,
+                    resignation,
+                    review,
+                    myColorIsBlack
+                );
+            } else if (
+                line.rfind("REVIEW ", 0) == 0 ||
+                line.rfind("RESUME ", 0) == 0
+            ) {
                 valid = applyRemoteReviewMessage(
                     line,
                     stones,
@@ -509,6 +590,7 @@ int main(int argc, char** argv) {
     bool gameEnded = false;
     RuleHistory history;
     ScoreReview review;
+    ResignationState resignation;
     unsigned long long revision = 0;
     bool connectionLost = false;
     bool myTurn = !networked;
@@ -611,6 +693,13 @@ int main(int argc, char** argv) {
         const bool prevTurn = isBlackTurn;
         const ScoreReview prevReview = review;
 
+        const bool canRequestResignation =
+            !connectionLost &&
+            (!networked || connected) &&
+            !resignation.pending &&
+            !resignation.finished &&
+            !(gameEnded && review.finalized);
+
         handleMouseClick(
             window,
             view,
@@ -620,6 +709,9 @@ int main(int argc, char** argv) {
             gameEnded,
             history,
             review,
+            resignation,
+            canRequestResignation,
+            myColorIsBlack,
             !connectionLost && (!networked || myTurn),
             networked
         );
@@ -675,6 +767,26 @@ int main(int argc, char** argv) {
             }
         }
 
+        if (resignation.pending && !resignation.requestSent) {
+            resignation.requestSent = true;
+
+            if (!networked || isHost) {
+                const bool blackResigned = resignation.blackResigned;
+
+                finishResignation(resignation, blackResigned);
+
+                if (networked) {
+                    pendingStates.push_back(
+                        string("RESIGN_RESULT ") +
+                        (blackResigned ? "B" : "W") +
+                        "\n"
+                    );
+                }
+            } else {
+                pendingStates.push_back("RESIGN_REQUEST\n");
+            }
+        }
+
         if (networked && connected && !connectionLost) {
             const Socket::Status sendStatus = pumpSend(socket);
 
@@ -690,6 +802,7 @@ int main(int argc, char** argv) {
                     gameEnded,
                     history,
                     review,
+                    resignation,
                     revision,
                     myColorIsBlack
                 );
@@ -730,7 +843,7 @@ int main(int argc, char** argv) {
             playerLine = "Local game";
         }
 
-        if (gameEnded && review.finalized) {
+        if (resignation.finished || (gameEnded && review.finalized)) {
             playerLine += " | Finished";
         } else if (gameEnded) {
             playerLine += " | Review: ";
@@ -743,7 +856,15 @@ int main(int argc, char** argv) {
         string statusLine;
         string detailLine;
 
-        if (connectionLost) {
+        if (resignation.finished) {
+            statusLine = resignation.blackResigned
+                ? "White wins by resignation"
+                : "Black wins by resignation";
+
+            detailLine = resignation.blackResigned
+                ? "Black conceded the game."
+                : "White conceded the game.";
+        } else if (connectionLost) {
             statusLine = connectionStatus;
             detailLine = "Restart both games to reconnect.";
         } else if (networked && !connected) {
@@ -752,6 +873,15 @@ int main(int argc, char** argv) {
             detailLine = isHost
                 ? "Black moves first once White connects."
                 : "Waiting to connect to the host.";
+        } else if (resignation.confirmationOpen) {
+            statusLine = resignation.blackResigned
+                ? "Resign as Black?"
+                : "Resign as White?";
+
+            detailLine = "Y: confirm resignation | Esc: cancel";
+        } else if (resignation.pending) {
+            statusLine = "Waiting for host confirmation";
+            detailLine = "Resignation requested.";
         } else if (gameEnded) {
             const FinalScore score =
                 calculateFinalScore(stonePositions, review);
@@ -804,10 +934,22 @@ int main(int argc, char** argv) {
 
         const bool canAct =
             !connectionLost &&
+            !resignation.confirmationOpen &&
+            !resignation.pending &&
+            !resignation.finished &&
             (!networked || (connected && myTurn)) &&
             (!gameEnded || (review.active && !review.finalized));
 
+        const bool canResignNow =
+            !connectionLost &&
+            !resignation.confirmationOpen &&
+            !resignation.pending &&
+            !resignation.finished &&
+            (!networked || connected) &&
+            !(gameEnded && review.finalized);
+
         const string buttonLabel =
+            resignation.finished ? "Done" :
             !gameEnded ? "Pass" :
             review.finalized ? "Done" :
             "Accept";
@@ -819,7 +961,8 @@ int main(int argc, char** argv) {
             statusLine,
             detailLine,
             canAct,
-            buttonLabel
+            buttonLabel,
+            canResignNow
         );
 
         window.display();

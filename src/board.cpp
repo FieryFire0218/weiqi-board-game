@@ -109,6 +109,18 @@ FloatRect getPassButtonBounds(const RenderWindow& window) {
         static_cast<float>(window.getSize().x);
 
     return FloatRect(
+        max(8.f, width - 152.f),
+        8.f,
+        68.f,
+        28.f
+    );
+}
+
+FloatRect getResignButtonBounds(const RenderWindow& window) {
+    const float width =
+        static_cast<float>(window.getSize().x);
+
+    return FloatRect(
         max(8.f, width - 76.f),
         8.f,
         68.f,
@@ -123,7 +135,8 @@ void drawStatusPanel(
     const string& statusLine,
     const string& detailLine,
     bool canPass,
-    const string& buttonLabel
+    const string& buttonLabel,
+    bool canResign
 ) {
     const Vector2u size = window.getSize();
 
@@ -238,6 +251,48 @@ void drawStatusPanel(
     );
 
     window.draw(label);
+
+    const FloatRect resignBounds = getResignButtonBounds(window);
+
+    RectangleShape resignButton(Vector2f(
+        resignBounds.width,
+        resignBounds.height
+    ));
+
+    resignButton.setPosition(
+        resignBounds.left,
+        resignBounds.top
+    );
+
+    resignButton.setFillColor(
+        canResign
+            ? Color(150, 65, 65)
+            : Color(55, 60, 68)
+    );
+
+    window.draw(resignButton);
+
+    Text resignLabel("Resign", font, 12);
+
+    resignLabel.setFillColor(
+        canResign
+            ? Color::White
+            : Color(145, 150, 158)
+    );
+
+    const FloatRect resignTextBounds =
+        resignLabel.getLocalBounds();
+
+    resignLabel.setPosition(
+        resignBounds.left +
+            (resignBounds.width - resignTextBounds.width) / 2.f -
+            resignTextBounds.left,
+        resignBounds.top +
+            (resignBounds.height - resignTextBounds.height) / 2.f -
+            resignTextBounds.top
+    );
+
+    window.draw(resignLabel);
 
     window.setView(savedView);
 }
@@ -498,6 +553,18 @@ bool applyReviewAction(
     return true;
 }
 
+void finishResignation(
+    ResignationState& resignation,
+    bool blackResigned
+) {
+    resignation.confirmationOpen = false;
+    resignation.pending = false;
+    resignation.requestSent = false;
+
+    resignation.finished = true;
+    resignation.blackResigned = blackResigned;
+}
+
 void handleMouseClick(
     RenderWindow& window,
     View& view,
@@ -507,6 +574,9 @@ void handleMouseClick(
     bool& gameEnded,
     RuleHistory& history,
     ScoreReview& review,
+    ResignationState& resignation,
+    bool canResign,
+    bool myColorIsBlack,
     bool allowMove,
     bool singleMove
 ) {
@@ -520,6 +590,58 @@ void handleMouseClick(
 
         if (event.type == Event::Resized) {
             updateViewForWindow(window, view);
+            continue;
+        }
+
+        // Resignation is independent of whose turn it is.
+        const bool resignationAllowed =
+            canResign &&
+            !resignation.pending &&
+            !resignation.finished &&
+            !(gameEnded && review.finalized);
+
+        if (!resignationAllowed) {
+            resignation.confirmationOpen = false;
+        }
+
+        if (resignation.confirmationOpen) {
+            if (event.type == Event::KeyPressed) {
+                if (event.key.code == Keyboard::Escape) {
+                    resignation.confirmationOpen = false;
+                } else if (event.key.code == Keyboard::Y) {
+                    resignation.confirmationOpen = false;
+                    resignation.pending = true;
+                    resignation.requestSent = false;
+                }
+            }
+
+            // Ignore gameplay input while confirming.
+            continue;
+        }
+
+        const bool resignKey =
+            event.type == Event::KeyPressed &&
+            event.key.code == Keyboard::Q;
+
+        const bool resignClick =
+            event.type == Event::MouseButtonPressed &&
+            event.mouseButton.button == Mouse::Left &&
+            getResignButtonBounds(window).contains(
+                static_cast<float>(event.mouseButton.x),
+                static_cast<float>(event.mouseButton.y)
+            );
+
+        if (resignationAllowed && (resignKey || resignClick)) {
+            // singleMove is true for network play.
+            // In local play, the currently active player is resigning.
+            resignation.blackResigned =
+                singleMove ? myColorIsBlack : isBlackTurn;
+
+            resignation.confirmationOpen = true;
+            continue;
+        }
+
+        if (resignation.pending || resignation.finished) {
             continue;
         }
 

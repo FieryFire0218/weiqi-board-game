@@ -34,6 +34,24 @@ struct ScoreReview {
         string(boardSize * boardSize, '0');
 };
 
+struct ResignationState {
+    bool confirmationOpen = false;
+    bool pending = false;
+    bool requestSent = false;
+
+    bool finished = false;
+    bool blackResigned = false;
+};
+
+void finishResignation(
+    ResignationState& resignation,
+    bool blackResigned
+);
+
+FloatRect getResignButtonBounds(
+    const RenderWindow& window
+);
+
 struct FinalScore {
     double black = 0.0;
     double white = 0.0;
@@ -95,6 +113,9 @@ void handleMouseClick(
     bool& gameEnded,
     RuleHistory& history,
     ScoreReview& review,
+    ResignationState& resignation,
+    bool canResign,
+    bool myColorIsBlack,
     bool allowMove = true,
     bool singleMove = false
 );
@@ -123,5 +144,6 @@ void drawStatusPanel(
     const string& statusLine,
     const string& detailLine,
     bool canPass,
-    const string& buttonLabel = "Pass"
+    const string& buttonLabel = "Pass",
+    bool canResign = false
 );
