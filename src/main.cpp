@@ -18,6 +18,105 @@ static const unsigned short kPort = 53000;
 
 static deque<string> pendingStates;
 
+struct RematchState {
+    unsigned long long gameNumber = 1;
+    bool localReady = false;
+    bool remoteReady = false;
+};
+
+static bool isFinished(
+    bool gameEnded,
+    const ScoreReview& review,
+    const ResignationState& resignation
+) {
+    return resignation.finished ||
+        (gameEnded && review.finalized);
+}
+
+static void startRematch(
+    vector<Stone>& stones,
+    bool& isBlackTurn,
+    int& consecutivePasses,
+    bool& gameEnded,
+    RuleHistory& history,
+    ScoreReview& review,
+    ResignationState& resignation,
+    RematchState& rematch
+) {
+    stones.clear();
+    isBlackTurn = true;
+    consecutivePasses = 0;
+    gameEnded = false;
+
+    history = RuleHistory{};
+    review = ScoreReview{};
+    resignation = ResignationState{};
+
+    ++rematch.gameNumber;
+    rematch.localReady = false;
+    rematch.remoteReady = false;
+}
+
+static bool applyRematchMessage(
+    const string& line,
+    vector<Stone>& stones,
+    bool& isBlackTurn,
+    int& consecutivePasses,
+    bool& gameEnded,
+    RuleHistory& history,
+    ScoreReview& review,
+    ResignationState& resignation,
+    RematchState& rematch,
+    bool isHost
+) {
+    istringstream input(line);
+    string tag;
+    string extra;
+    unsigned long long gameNumber = 0;
+
+    if (!(input >> tag >> gameNumber) || (input >> extra)) {
+        return false;
+    }
+
+    if (!isFinished(gameEnded, review, resignation)) {
+        return false;
+    }
+
+    if (tag == "REMATCH_READY") {
+        if (gameNumber != rematch.gameNumber) {
+            return false;
+        }
+
+        rematch.remoteReady = true;
+        return true;
+    }
+
+    if (tag == "REMATCH_START") {
+        // Only the host starts a mutually accepted rematch.
+        if (isHost ||
+            gameNumber != rematch.gameNumber + 1 ||
+            !rematch.localReady ||
+            !rematch.remoteReady) {
+            return false;
+        }
+
+        startRematch(
+            stones,
+            isBlackTurn,
+            consecutivePasses,
+            gameEnded,
+            history,
+            review,
+            resignation,
+            rematch
+        );
+
+        return true;
+    }
+
+    return false;
+}
+
 static void enqueueState(
     const vector<Stone>& stones,
     bool isBlackTurn,
@@ -375,8 +474,10 @@ static Socket::Status recvState(
     RuleHistory& history,
     ScoreReview& review,
     ResignationState& resignation,
+    RematchState& rematch,
     unsigned long long& revision,
-    bool myColorIsBlack
+    bool myColorIsBlack,
+    bool isHost
 ) {
     for (int reads = 0; ; ++reads) {
         // Process buffered messages BEFORE attempting another receive.
@@ -388,7 +489,20 @@ static Socket::Status recvState(
 
             bool valid = false;
 
-            if (line.rfind("RESIGN", 0) == 0) {
+            if (line.rfind("REMATCH_", 0) == 0) {
+                valid = applyRematchMessage(
+                    line,
+                    stones,
+                    isBlackTurn,
+                    consecutivePasses,
+                    gameEnded,
+                    history,
+                    review,
+                    resignation,
+                    rematch,
+                    isHost
+                );
+            } else if (line.rfind("RESIGN", 0) == 0) {
                 valid = applyResignationMessage(
                     line,
                     resignation,
@@ -591,6 +705,7 @@ int main(int argc, char** argv) {
     RuleHistory history;
     ScoreReview review;
     ResignationState resignation;
+    RematchState rematch;
     unsigned long long revision = 0;
     bool connectionLost = false;
     bool myTurn = !networked;
@@ -700,21 +815,67 @@ int main(int argc, char** argv) {
             !resignation.finished &&
             !(gameEnded && review.finalized);
 
-        handleMouseClick(
-            window,
-            view,
-            stonePositions,
-            isBlackTurn,
-            consecutivePasses,
-            gameEnded,
-            history,
-            review,
-            resignation,
-            canRequestResignation,
-            myColorIsBlack,
-            !connectionLost && (!networked || myTurn),
-            networked
-        );
+        if (isFinished(gameEnded, review, resignation)) {
+            Event event;
+
+            while (window.pollEvent(event)) {
+                if (event.type == Event::Closed) {
+                    window.close();
+                    continue;
+                }
+
+                if (event.type == Event::Resized) {
+                    updateViewForWindow(window, view);
+                    continue;
+                }
+
+                const bool rematchKey =
+                    event.type == Event::KeyPressed &&
+                    event.key.code == Keyboard::N;
+
+                const bool rematchClick =
+                    event.type == Event::MouseButtonPressed &&
+                    event.mouseButton.button == Mouse::Left &&
+                    getPassButtonBounds(window).contains(
+                        static_cast<float>(event.mouseButton.x),
+                        static_cast<float>(event.mouseButton.y)
+                    );
+
+                const bool canRequestRematch =
+                    !connectionLost &&
+                    (!networked || connected) &&
+                    !rematch.localReady;
+
+                if (canRequestRematch &&
+                    (rematchKey || rematchClick)) {
+                    rematch.localReady = true;
+
+                    if (networked) {
+                        pendingStates.push_back(
+                            "REMATCH_READY " +
+                            to_string(rematch.gameNumber) +
+                            "\n"
+                        );
+                    }
+                }
+            }
+        } else {
+            handleMouseClick(
+                window,
+                view,
+                stonePositions,
+                isBlackTurn,
+                consecutivePasses,
+                gameEnded,
+                history,
+                review,
+                resignation,
+                canRequestResignation,
+                myColorIsBlack,
+                !connectionLost && (!networked || myTurn),
+                networked
+            );
+        }
 
         if (!window.isOpen()) {
             break;
@@ -803,8 +964,10 @@ int main(int argc, char** argv) {
                     history,
                     review,
                     resignation,
+                    rematch,
                     revision,
-                    myColorIsBlack
+                    myColorIsBlack,
+                    isHost
                 );
             }
 
@@ -825,6 +988,38 @@ int main(int argc, char** argv) {
             !connectionLost &&
             (!networked ||
                 (connected && isBlackTurn == myColorIsBlack));
+        
+        const bool canStartRematch =
+            isFinished(gameEnded, review, resignation) &&
+            rematch.localReady &&
+            !connectionLost &&
+            (!networked ||
+                (connected && isHost && rematch.remoteReady));
+
+        if (canStartRematch) {
+            if (networked) {
+                pendingStates.push_back(
+                    "REMATCH_START " +
+                    to_string(rematch.gameNumber + 1) +
+                    "\n"
+                );
+            }
+
+            startRematch(
+                stonePositions,
+                isBlackTurn,
+                consecutivePasses,
+                gameEnded,
+                history,
+                review,
+                resignation,
+                rematch
+            );
+
+            myTurn =
+                !networked ||
+                (connected && isBlackTurn == myColorIsBlack);
+        }
 
         window.clear(Color(28, 32, 38));
         window.setView(view);
@@ -932,6 +1127,33 @@ int main(int argc, char** argv) {
                 to_string(consecutivePasses);
         }
 
+        const bool finished =
+            isFinished(gameEnded, review, resignation);
+
+        if (finished) {
+            if (connectionLost) {
+                detailLine = "Disconnected. Restart to reconnect.";
+            } else if (networked && !connected) {
+                detailLine = "Waiting for connection.";
+            } else if (!networked) {
+                detailLine = "Again / N: new game";
+            } else if (rematch.localReady) {
+                detailLine = rematch.remoteReady
+                    ? "Starting rematch..."
+                    : "Rematch requested. Waiting for opponent.";
+            } else if (rematch.remoteReady) {
+                detailLine = "Rematch offered. Again / N: accept";
+            } else {
+                detailLine = "Again / N: request rematch";
+            }
+        }
+
+        const bool canRematch =
+            finished &&
+            !connectionLost &&
+            (!networked || connected) &&
+            !rematch.localReady;
+
         const bool canAct =
             !connectionLost &&
             !resignation.confirmationOpen &&
@@ -949,10 +1171,9 @@ int main(int argc, char** argv) {
             !(gameEnded && review.finalized);
 
         const string buttonLabel =
-            resignation.finished ? "Done" :
-            !gameEnded ? "Pass" :
-            review.finalized ? "Done" :
-            "Accept";
+            finished
+                ? (rematch.localReady ? "Wait" : "Again")
+                : (gameEnded ? "Accept" : "Pass");
 
         drawStatusPanel(
             window,
@@ -960,7 +1181,7 @@ int main(int argc, char** argv) {
             playerLine,
             statusLine,
             detailLine,
-            canAct,
+            canAct || canRematch,
             buttonLabel,
             canResignNow
         );
